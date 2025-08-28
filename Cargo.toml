@@ -1,0 +1,10 @@
+[package]
+name = "MachineLearningGPU"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-std = "1.13.1"
+bytemuck = "1.23.2"
+pollster = "0.4.0"
+wgpu = "26.0.1"
