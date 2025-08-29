@@ -447,7 +447,7 @@ impl BackwardDir{
 
         if dir_i == nn_info.n_layers - 2{
             next_layer_start = 0;
-            next_layer_length = nn_info.activity_info.a_dim[dir_i + 1] as u32;
+            next_layer_length = 1;
         }
 
         else{
@@ -476,7 +476,7 @@ impl BackwardDir{
             ping_start : (ping_pong_default - nn_info.activity_info.a_deriv_buffer_size * ping_switch) as u32,
             pong_start : (ping_pong_default - nn_info.activity_info.a_deriv_buffer_size * pong_switch) as u32,
 
-            gradients_start: nn_info.activity_info.g_start as u32,
+            gradients_start: nn_info.activity_info.g_start as u32 + nn_info.layer_info[dir_i].offset as u32,
             gradient_length: nn_info.activity_info.a_dim[dir_i] as u32 + 1,
 
             n_batches: nn_info.n_batches as u32,
@@ -516,6 +516,7 @@ pub struct ActivityDir{
 
     activities_info: Vec<ActivityInfo>,
     buffer_size: usize,
+    single_buffer_size: usize,
 }
 
 impl ActivityDir{
@@ -536,11 +537,20 @@ impl ActivityDir{
             n_batches: nn_info.n_batches,
             activities_info: activities_info,
             buffer_size: nn_info.activity_info.a_length * nn_info.n_batches,
+            single_buffer_size: nn_info.activity_info.a_length,
         }
     }
 
     pub fn create_buffer(&self) -> Vec<f32>{
-        return vec![0.0; self.buffer_size];
+        let mut v = vec![0.0; self.buffer_size];
+
+        for n in 0..self.n_batches{
+            for i in 0..12{
+                v[n*self.single_buffer_size + 24 + i] = -1.0;
+            }
+        }
+
+        return v;
     }
 }
 

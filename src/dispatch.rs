@@ -362,13 +362,14 @@ impl NNDispatch{
             pass.set_pipeline(&self.backward_pass_info.pipeline);
 
             for layer_i in (0..(self.nn_info.get_n_layers() - 1)).rev(){
+            // let layer_i = self.nn_info.get_n_layers() - 2;
                 let dyn_off = layer_i as u32 * self.backward_pass_info.dir_slot_size as u32;
                 pass.set_bind_group(0, &self.backward_pass_info.bind_group, &[dyn_off]);
 
-                pass.dispatch_workgroups(self.nn_info.get_dim_n(layer_i + 1) as u32, self.nn_info.get_n_batches() as u32, 1);
+                pass.dispatch_workgroups(self.nn_info.get_dim_n(layer_i + 1) as u32, self.nn_info.get_dim_n(layer_i) as u32 + 1, self.nn_info.get_n_batches() as u32);
             }
         }
-
+// 0.0, 0.0, 1.0, 1.0, 1.0, 4.0, 4.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0,
         let backward_commands = encoder.finish();
         self.queue.submit([backward_commands]); 
     }
