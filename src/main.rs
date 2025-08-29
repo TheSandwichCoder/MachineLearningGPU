@@ -23,10 +23,12 @@ struct Meta {
 fn main() {
     // pollster::block_on(run());
     let mut gpu = pollster::block_on(NNDispatch::new(&vec![2, 3, 2]));
-
+    gpu.nn_info.show_all_specs();
     gpu.forward();
 
-    gpu.read_back();
+    gpu.backward();
+
+    gpu.read_back_raw();
 
 }
 

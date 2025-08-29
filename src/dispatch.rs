@@ -2,7 +2,31 @@ use std::num::NonZeroU64;
 use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
 
-use crate::datatypes::{NeuralNetworkInfo, ForwardDir};
+use crate::datatypes::{NeuralNetworkInfo, ForwardDir, BackwardDir};
+
+pub struct NNPassInfo{
+    pub dir_buffer: wgpu::Buffer, // for metas
+
+    pub shader: wgpu::ShaderModule,
+
+    pub bind_group: wgpu::BindGroup,
+
+    pub pipeline: wgpu::ComputePipeline,
+
+    pub dir_slot_size: u64,
+}
+
+impl NNPassInfo{
+    pub fn new(b: wgpu::Buffer, s: wgpu::ShaderModule, bg: wgpu::BindGroup, p: wgpu::ComputePipeline, ss: u64) -> Self{
+        return NNPassInfo{
+            dir_buffer: b, // for metas
+            shader: s,
+            bind_group: bg,
+            pipeline: p,
+            dir_slot_size: ss,
+        }
+    }
+}
 
 pub struct NNDispatch{
     // gpu stuff
@@ -14,19 +38,14 @@ pub struct NNDispatch{
     param_buffer: wgpu::Buffer, // holds the params for the model
     act_buffer: wgpu::Buffer, // holds intermediate layer outputs and gradients
     out_buffer: wgpu::Buffer, // this is only for info that we want (eg. accuracy)
-    forward_dir_buffer: wgpu::Buffer, // for metas
 
-    forward_shader: wgpu::ShaderModule,
 
-    forward_bind_group: wgpu::BindGroup,
+    forward_pass_info: NNPassInfo,
 
-    forward_pipeline: wgpu::ComputePipeline,
-
-    
-    nn_dir_slot_size: u32,
+    backward_pass_info: NNPassInfo,
 
     // nn info
-    nn_info: NeuralNetworkInfo,
+    pub nn_info: NeuralNetworkInfo,
 
 }
 
@@ -45,6 +64,8 @@ impl NNDispatch{
             trace: wgpu::Trace::Off,                      // <-- not Option
         })
         .await.expect("request_device failed");
+
+        let align = device.limits().min_uniform_buffer_offset_alignment as u64;
 
         // ---------------------Neural Network Info---------------------
         let nn_info = NeuralNetworkInfo::new(nn_dim, 16);
@@ -70,7 +91,7 @@ impl NNDispatch{
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        
+
         // +--------------------------------------------------------+
         // |                                                        |
         // |                    Forward Pass                        |
@@ -78,9 +99,8 @@ impl NNDispatch{
         // +--------------------------------------------------------+
 
 
-        let align = device.limits().min_uniform_buffer_offset_alignment as u64;
-        let slot   = ((std::mem::size_of::<ForwardDir>() as u64 + align - 1) / align) * align;
-        let forward_dir_buffer_size = slot * (nn_info.get_n_layers() - 1) as u64;
+        let forward_slot   = ((std::mem::size_of::<ForwardDir>() as u64 + align - 1) / align) * align;
+        let forward_dir_buffer_size = forward_slot * (nn_info.get_n_layers() - 1) as u64;
 
         let forward_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
             label: Some("nn_dir_buf"),
@@ -93,7 +113,7 @@ impl NNDispatch{
         let forward_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
             buffer: &forward_dir_buffer,
             offset: 0,
-            size: Some(wgpu::BufferSize::new(slot).unwrap()),
+            size: Some(wgpu::BufferSize::new(forward_slot).unwrap()),
         });
 
 
@@ -160,7 +180,7 @@ impl NNDispatch{
 
             println!("{}", forward_dir.read_layer_length);
 
-            queue.write_buffer(&forward_dir_buffer, layer_i as u64 * slot, bytemuck::bytes_of(&forward_dir));
+            queue.write_buffer(&forward_dir_buffer, layer_i as u64 * forward_slot, bytemuck::bytes_of(&forward_dir));
         }
 
         // ---------------------Pipeline Layout---------------------
@@ -187,9 +207,106 @@ impl NNDispatch{
         // |                    Backward Pass                       |
         // |                                                        |
         // +--------------------------------------------------------+
+        
+        let backward_slot   = ((std::mem::size_of::<BackwardDir>() as u64 + align - 1) / align) * align;
+        let backward_dir_buffer_size = backward_slot * (nn_info.get_n_layers() - 1) as u64;
+
+        let backward_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
+            label: Some("backward_dir_buf"),
+            size: backward_dir_buffer_size,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // ---------------------Special Binding---------------------
+        let backward_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &backward_dir_buffer,
+            offset: 0,
+            size: Some(wgpu::BufferSize::new(backward_slot).unwrap()),
+        });
 
 
+        // ---------------------Shader Sources---------------------
+        let wgsl_src = include_str!("shaders/backward_nn.wgsl");
+        let backward_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+            label: Some("backward_shader"),
+            source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
+        });
 
+        // ---------------------Bind Layout---------------------
+        let backward_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("backward_bind_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<BackwardDir>() as u64),
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let backward_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
+            label: Some("bg"),
+            layout: &backward_bind_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: param_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: act_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: backward_dir_binding },
+            ],
+        });
+
+            // ---------------------Update Meta---------------------
+
+        for layer_i in 0..nn_info.get_n_layers() - 1{
+            let backward_dir = BackwardDir::new(&nn_info, layer_i); 
+
+            queue.write_buffer(&backward_dir_buffer, layer_i as u64 * backward_slot, bytemuck::bytes_of(&backward_dir));
+        }
+
+        // ---------------------Pipeline Layout---------------------
+
+        let backward_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
+            label: Some("backward_pipeline_layout"),
+            bind_group_layouts: &[&backward_bind_layout],
+            push_constant_ranges: &[],
+        });
+
+        let backward_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("backward_pipeline"),
+            layout: Some(&backward_pipeline_layout),
+            module: &backward_shader,
+            entry_point: Some("main"),
+            cache: None,
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
+        let forward_pass_info = NNPassInfo::new(forward_dir_buffer, forward_shader, forward_bind_group, forward_pipeline, forward_slot);
+        let backward_pass_info = NNPassInfo::new(backward_dir_buffer, backward_shader, backward_bind_group, backward_pipeline, backward_slot);
 
         println!("SUCCESSFULLY INITIALISED GPU");
 
@@ -202,15 +319,9 @@ impl NNDispatch{
             param_buffer,
             act_buffer,
             out_buffer,
-            forward_dir_buffer,
 
-            forward_shader,
-
-            forward_bind_group,
-
-            forward_pipeline,
-
-            nn_dir_slot_size: slot as u32,
+            forward_pass_info,
+            backward_pass_info,
 
             nn_info,
         }
@@ -225,11 +336,11 @@ impl NNDispatch{
                 timestamp_writes: None,
             });
 
-            pass.set_pipeline(&self.forward_pipeline);
+            pass.set_pipeline(&self.forward_pass_info.pipeline);
 
             for layer_i in 0..(self.nn_info.get_n_layers() - 1){
-                let dyn_off = layer_i as u32 * self.nn_dir_slot_size;
-                pass.set_bind_group(0, &self.forward_bind_group, &[dyn_off]);
+                let dyn_off = layer_i as u32 * self.forward_pass_info.dir_slot_size as u32;
+                pass.set_bind_group(0, &self.forward_pass_info.bind_group, &[dyn_off]);
 
                 pass.dispatch_workgroups(self.nn_info.get_dim_n(layer_i + 1) as u32, self.nn_info.get_n_batches() as u32, 1);
             }
@@ -239,7 +350,30 @@ impl NNDispatch{
         self.queue.submit([forward_commands]);  
     }
 
-    pub fn read_back(&self){
+    pub fn backward(&self){
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("cpass"),
+                timestamp_writes: None,
+            });
+
+            pass.set_pipeline(&self.backward_pass_info.pipeline);
+
+            for layer_i in (0..(self.nn_info.get_n_layers() - 1)).rev(){
+                let dyn_off = layer_i as u32 * self.backward_pass_info.dir_slot_size as u32;
+                pass.set_bind_group(0, &self.backward_pass_info.bind_group, &[dyn_off]);
+
+                pass.dispatch_workgroups(self.nn_info.get_dim_n(layer_i + 1) as u32, self.nn_info.get_n_batches() as u32, 1);
+            }
+        }
+
+        let backward_commands = encoder.finish();
+        self.queue.submit([backward_commands]); 
+    }
+
+    pub fn read_back_params(&self){
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
         
         encoder.copy_buffer_to_buffer(&self.param_buffer, 0, &self.out_buffer, 0, self.nn_info.p_length as u64 *4);
@@ -255,5 +389,23 @@ impl NNDispatch{
         let out: &[f32] = bytemuck::cast_slice(&data);
 
         self.nn_info.read_readback(out);
+    }
+
+    pub fn read_back_raw(&self){
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
+        
+        encoder.copy_buffer_to_buffer(&self.act_buffer, 0, &self.out_buffer, 0, 1024);
+
+        self.queue.submit(Some(encoder.finish()));
+
+        let slice = self.out_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| ());
+        self.device.poll(wgpu::PollType::Wait).unwrap();
+
+        // Now it's safe to read.
+        let data = slice.get_mapped_range();
+        let out: &[f32] = bytemuck::cast_slice(&data);
+
+        println!("{:?}", out);
     }
 }
