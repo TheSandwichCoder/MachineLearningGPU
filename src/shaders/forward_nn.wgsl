@@ -10,6 +10,8 @@ struct NNDir{
 
     n_batches: u32, 
     batch_act_size: u32,
+
+    activation_type: u32,
 };
 
 
@@ -37,5 +39,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   z += params[tens_start + nn_dir.read_layer_length];
 
+  if (nn_dir.activation_type == 1){
+    z = ReLu(z);
+  }
+
   activities[act_start + nn_dir.write_layer_start + output_i] = z;
+}
+
+fn ReLu(x: f32) -> f32{
+  if (x > 0.0){
+    return x;
+  }
+
+  return 0;
 }

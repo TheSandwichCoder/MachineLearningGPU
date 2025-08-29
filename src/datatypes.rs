@@ -392,6 +392,8 @@ pub struct ForwardDir {
 
     pub n_batches: u32,
     pub batch_act_size: u32,
+
+    pub activation_type: u32,
 }
 
 impl ForwardDir{
@@ -399,6 +401,15 @@ impl ForwardDir{
         nn_info: &NeuralNetworkInfo,
         dir_i: usize,
     ) -> Self{
+        let activation_type: u32;
+
+        if nn_info.n_layers + 2 == dir_i{
+            activation_type = 0;
+        }
+        else{
+            activation_type = 1;
+        }
+
         ForwardDir{
             read_layer_start: nn_info.activity_info.a_strides[dir_i] as u32,
             read_layer_length: nn_info.activity_info.a_dim[dir_i] as u32,
@@ -411,6 +422,8 @@ impl ForwardDir{
 
             n_batches: nn_info.n_batches as u32,
             batch_act_size: nn_info.activity_info.a_length as u32,
+
+            activation_type: activation_type,
         }
     }
 }
@@ -438,6 +451,8 @@ pub struct BackwardDir {
 
     n_batches: u32, 
     batch_act_size: u32,
+
+    activation_type: u32,
 }
 
 impl BackwardDir{
@@ -463,6 +478,16 @@ impl BackwardDir{
 
         let ping_pong_default = nn_info.activity_info.a_length - nn_info.activity_info.a_deriv_buffer_size;
 
+        let activation_type: u32;
+
+        if nn_info.n_layers + 2 == dir_i{
+            activation_type = 0;
+        }
+        else{
+            activation_type = 1;
+        }
+
+
         BackwardDir{
             prev_layer_start: nn_info.activity_info.a_strides[dir_i] as u32,
             prev_layer_length: nn_info.activity_info.a_dim[dir_i] as u32,
@@ -484,6 +509,8 @@ impl BackwardDir{
 
             n_batches: nn_info.n_batches as u32,
             batch_act_size: nn_info.activity_info.a_length as u32,
+
+            activation_type: activation_type,
         }
     }
 }

@@ -19,6 +19,8 @@ struct NNDir{
 
     n_batches: u32, 
     batch_act_size: u32,
+
+    activation_type: u32,
 };
 
 const lr = 0.1;
@@ -46,6 +48,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let output_deriv_start = nn_dir.pong_start + nn_dir.prev_layer_length * output_i;
 
     let z = activities[act_start + nn_dir.curr_layer_start + output_i];
+    
+    var act_z = 0.0;
+    
+    if (nn_dir.activation_type != 0){
+        act_z = derivReLu(z);
+    }
 
     // reset the gradients and derivatives
     activities[act_start + output_gradient_start + input_i] = 0.0;
@@ -58,8 +66,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     for (var der_i: u32 = 0; der_i < nn_dir.next_layer_length; der_i++){
         let part_deriv = activities[act_start + input_deriv_start + der_i * nn_dir.curr_layer_length + output_i];
         
-        let act_z = 1.0; // please do this 
-
         // weights
         if (input_i < nn_dir.prev_layer_length){
             let prev_act_info = activities[act_start + nn_dir.prev_layer_start + input_i];
@@ -78,4 +84,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             activities[act_start + output_gradient_start + input_i] += part_deriv;
         }
     }
+}
+
+fn derivReLu(x: f32) -> f32{
+  if (x > 0.0){
+    return 1;
+  }
+
+  return 0;
 }
