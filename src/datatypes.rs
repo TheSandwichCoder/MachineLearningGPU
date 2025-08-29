@@ -246,6 +246,7 @@ pub struct NeuralNetworkInfo{
     pub nn_length: usize,
     pub p_length: usize,
     pub n_batches: usize,
+    pub lr: f32,
 }
 
 impl NeuralNetworkInfo{
@@ -258,6 +259,7 @@ impl NeuralNetworkInfo{
             nn_length: 0,
             p_length: 0,
             n_batches: 0,
+            lr: 0.0,
         }
     }
 
@@ -345,6 +347,7 @@ impl NeuralNetworkInfo{
             nn_length: offset,
             p_length: p_length,
             n_batches: n_batches,
+            lr: 0.1,
         }
     }
 
@@ -362,10 +365,10 @@ impl NeuralNetworkInfo{
             let output_layer_n = self.layer_dim[layer_i + 1];
 
             for output_i in 0..output_layer_n{
-                let start_i = layer_info_i.offset + output_i * input_layer_n;
-                let end_i = layer_info_i.offset + (output_i + 1)* input_layer_n;
+                let start_i = layer_info_i.offset + output_i * (input_layer_n + 1);
+                let end_i = start_i + input_layer_n;
 
-                println!("{:?} {}", &param_slice[start_i..end_i], param_slice[end_i + 1]);
+                println!("{:?} {}", &param_slice[start_i..end_i], param_slice[end_i]);
 
             }
             layer_i += 1;
@@ -486,6 +489,28 @@ impl BackwardDir{
 }
 
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct GradientDir{
+    batch_start_i: u32,
+    gradient_start_i: u32,
+    batch_contribution: f32,
+    lr: f32,
+}
+
+impl GradientDir{
+    pub fn new(nn_info : &NeuralNetworkInfo, dir_i: usize) -> Self{
+        return GradientDir{
+            batch_start_i: nn_info.activity_info.a_length as u32 * dir_i as u32,
+            gradient_start_i: nn_info.activity_info.g_start as u32,
+            batch_contribution: 1.0 / nn_info.n_batches as f32,
+            lr: nn_info.lr,
+        }
+    }
+}
+
+
+
 pub struct ParamsDir{
     layer_dim: Vec<usize>,
     n_layers: usize,
@@ -553,7 +578,6 @@ impl ActivityDir{
         return v;
     }
 }
-
 
 
 

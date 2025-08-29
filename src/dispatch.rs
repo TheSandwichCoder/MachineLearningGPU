@@ -2,7 +2,7 @@ use std::num::NonZeroU64;
 use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
 
-use crate::datatypes::{NeuralNetworkInfo, ForwardDir, BackwardDir};
+use crate::datatypes::{NeuralNetworkInfo, ForwardDir, BackwardDir, GradientDir};
 
 pub struct NNPassInfo{
     pub dir_buffer: wgpu::Buffer, // for metas
@@ -43,6 +43,8 @@ pub struct NNDispatch{
     forward_pass_info: NNPassInfo,
 
     backward_pass_info: NNPassInfo,
+
+    gradient_pass_info: NNPassInfo,
 
     // nn info
     pub nn_info: NeuralNetworkInfo,
@@ -305,8 +307,112 @@ impl NNDispatch{
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
+        // +--------------------------------------------------------+
+        // |                                                        |
+        // |                    Gradient Pass                       |
+        // |                                                        |
+        // +--------------------------------------------------------+
+
+        let gradient_slot   = ((std::mem::size_of::<BackwardDir>() as u64 + align - 1) / align) * align;
+        let gradient_dir_buffer_size = backward_slot as u64 * nn_info.n_batches as u64;
+
+        let gradient_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
+            label: Some("gradient_dir_buf"),
+            size: gradient_dir_buffer_size,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // ---------------------Special Binding---------------------
+        let gradient_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &gradient_dir_buffer,
+            offset: 0,
+            size: Some(wgpu::BufferSize::new(backward_slot).unwrap()),
+        });
+
+        // ---------------------Shader Sources---------------------
+        let wgsl_src = include_str!("shaders/apply_gradients.wgsl");
+        let gradient_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+            label: Some("gradient_shader"),
+            source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
+        });
+
+        // ---------------------Bind Layout---------------------
+        let gradient_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("gradient_bind_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<GradientDir>() as u64),
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let gradient_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
+            label: Some("bg"),
+            layout: &gradient_bind_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: param_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: act_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: gradient_dir_binding },
+            ],
+        });
+
+            // ---------------------Update Meta---------------------
+
+        for batch_i in 0..nn_info.n_batches{
+            let gradient_dir = GradientDir::new(&nn_info, batch_i); 
+
+            queue.write_buffer(&gradient_dir_buffer, batch_i as u64 * gradient_slot, bytemuck::bytes_of(&gradient_dir));
+        }
+
+        // ---------------------Pipeline Layout---------------------
+
+        let gradient_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
+            label: Some("gradient_pipeline_layout"),
+            bind_group_layouts: &[&gradient_bind_layout],
+            push_constant_ranges: &[],
+        });
+
+        let gradient_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("gradient_pipeline"),
+            layout: Some(&gradient_pipeline_layout),
+            module: &gradient_shader,
+            entry_point: Some("main"),
+            cache: None,
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
         let forward_pass_info = NNPassInfo::new(forward_dir_buffer, forward_shader, forward_bind_group, forward_pipeline, forward_slot);
         let backward_pass_info = NNPassInfo::new(backward_dir_buffer, backward_shader, backward_bind_group, backward_pipeline, backward_slot);
+        let gradient_pass_info = NNPassInfo::new(gradient_dir_buffer, gradient_shader, gradient_bind_group, gradient_pipeline, gradient_slot);
+
 
         println!("SUCCESSFULLY INITIALISED GPU");
 
@@ -322,6 +428,7 @@ impl NNDispatch{
 
             forward_pass_info,
             backward_pass_info,
+            gradient_pass_info,
 
             nn_info,
         }
@@ -362,16 +469,38 @@ impl NNDispatch{
             pass.set_pipeline(&self.backward_pass_info.pipeline);
 
             for layer_i in (0..(self.nn_info.get_n_layers() - 1)).rev(){
-            // let layer_i = self.nn_info.get_n_layers() - 2;
                 let dyn_off = layer_i as u32 * self.backward_pass_info.dir_slot_size as u32;
                 pass.set_bind_group(0, &self.backward_pass_info.bind_group, &[dyn_off]);
 
                 pass.dispatch_workgroups(self.nn_info.get_dim_n(layer_i + 1) as u32, self.nn_info.get_dim_n(layer_i) as u32 + 1, self.nn_info.get_n_batches() as u32);
             }
         }
-// 0.0, 0.0, 1.0, 1.0, 1.0, 4.0, 4.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0,
+
         let backward_commands = encoder.finish();
         self.queue.submit([backward_commands]); 
+    }
+
+    pub fn apply_gradients(&self){
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("cpass"),
+                timestamp_writes: None,
+            });
+
+            pass.set_pipeline(&self.gradient_pass_info.pipeline);
+
+            for batch_i in 0..self.nn_info.n_batches{
+                let dyn_off = batch_i as u32 * self.gradient_pass_info.dir_slot_size as u32;
+                pass.set_bind_group(0, &self.gradient_pass_info.bind_group, &[dyn_off]);
+
+                pass.dispatch_workgroups(self.nn_info.p_length as u32, 1, 1);
+            }
+        }
+
+        let gradient_commands = encoder.finish();
+        self.queue.submit([gradient_commands]); 
     }
 
     pub fn read_back_params(&self){

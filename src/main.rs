@@ -25,10 +25,14 @@ fn main() {
     let mut gpu = pollster::block_on(NNDispatch::new(&vec![2, 3, 2]));
     gpu.nn_info.show_all_specs();
     gpu.forward();
-
+    
     gpu.backward();
-
+    gpu.apply_gradients();
+    
+    gpu.forward();
+    
     gpu.read_back_raw();
+    // gpu.read_back_params();
 
 }
 
