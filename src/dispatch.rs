@@ -3,6 +3,7 @@ use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
 
 use crate::datatypes::{NeuralNetworkInfo, ForwardDir, BackwardDir, GradientDir};
+use crate::data_reader::DataReader;
 
 pub struct NNPassInfo{
     pub dir_buffer: wgpu::Buffer, // for metas
@@ -38,6 +39,7 @@ pub struct NNDispatch{
     param_buffer: wgpu::Buffer, // holds the params for the model
     act_buffer: wgpu::Buffer, // holds intermediate layer outputs and gradients
     out_buffer: wgpu::Buffer, // this is only for info that we want (eg. accuracy)
+    data_buffer: wgpu::Buffer, // holds current batch of data
 
 
     forward_pass_info: NNPassInfo,
@@ -48,6 +50,7 @@ pub struct NNDispatch{
 
     // nn info
     pub nn_info: NeuralNetworkInfo,
+    pub data_reader: DataReader,
 
 }
 
@@ -70,9 +73,15 @@ impl NNDispatch{
         let align = device.limits().min_uniform_buffer_offset_alignment as u64;
 
         // ---------------------Neural Network Info---------------------
-        let nn_info = NeuralNetworkInfo::new(nn_dim, 16);
+        let nn_info = NeuralNetworkInfo::new(nn_dim, 32);
 
         let (p_dir, a_dir) = nn_info.create_dirs();
+
+        // ---------------------Data Reader---------------------
+        let mut data_reader = DataReader::new(String::from("./datasets/mnist_numbers.csv"), 1024);
+        data_reader.initialise_mnist_params();
+        data_reader.load_batch_mnist();
+
         
         // ---------------------Buffer Stuff---------------------
         let param_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
@@ -92,6 +101,12 @@ impl NNDispatch{
             size: (1024 * std::mem::size_of::<f32>()) as u64,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
+        });
+
+        let data_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+            label: Some("data buffer"),
+            contents: bytemuck::cast_slice(&data_reader.get_buffer()),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
 
         // +--------------------------------------------------------+
@@ -425,12 +440,14 @@ impl NNDispatch{
             param_buffer,
             act_buffer,
             out_buffer,
+            data_buffer,
 
             forward_pass_info,
             backward_pass_info,
             gradient_pass_info,
 
             nn_info,
+            data_reader,
         }
     }
 
@@ -480,6 +497,27 @@ impl NNDispatch{
         self.queue.submit([backward_commands]); 
     }
 
+    pub fn set_data(&self){
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
+
+        let curr_batch_start = self.data_reader.load_batch_i * self.data_reader.load_batch_length * (self.data_reader.data_value_size + 1);
+        for batch_i in 0..self.nn_info.n_batches{
+            let write_i = batch_i * self.nn_info.activity_info.a_length;
+
+            let read_i = batch_i * (self.data_reader.data_value_size + 1) + curr_batch_start + 1; // plus one to skip the label
+
+            encoder.copy_buffer_to_buffer(
+                &self.data_buffer, 
+                (read_i * 4) as u64, 
+                &self.act_buffer, 
+                (write_i * 4) as u64, 
+                (self.data_reader.data_value_size * 4) as u64
+            );
+        }
+
+        self.queue.submit([encoder.finish()]);
+    }
+
     pub fn apply_gradients(&self){
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
 
@@ -519,6 +557,24 @@ impl NNDispatch{
         let out: &[f32] = bytemuck::cast_slice(&data);
 
         self.nn_info.read_readback(out);
+    }
+
+    pub fn read_back_data(&self){
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
+        
+        encoder.copy_buffer_to_buffer(&self.data_buffer, 0, &self.out_buffer, 0, 1024);
+
+        self.queue.submit(Some(encoder.finish()));
+
+        let slice = self.out_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| ());
+        self.device.poll(wgpu::PollType::Wait).unwrap();
+
+        // Now it's safe to read.
+        let data = slice.get_mapped_range();
+        let out: &[f32] = bytemuck::cast_slice(&data);
+
+        println!("{:?}", out);
     }
 
     pub fn read_back_raw(&self){

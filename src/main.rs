@@ -1,9 +1,11 @@
 use std::num::NonZeroU64;
 use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
+use std::time::Instant;
 
 mod datatypes;
 mod dispatch;
+mod data_reader;
 
 use crate::datatypes::*;
 use crate::dispatch::*;
@@ -22,13 +24,13 @@ struct Meta {
 
 fn main() {
     // pollster::block_on(run());
-    let mut gpu = pollster::block_on(NNDispatch::new(&vec![2, 3, 2]));
+    let mut gpu = pollster::block_on(NNDispatch::new(&vec![784, 3, 2]));
     gpu.nn_info.show_all_specs();
-    gpu.forward();
+
     
-    gpu.backward();
-    gpu.apply_gradients();
-    
+
+    gpu.set_data();
+
     gpu.forward();
     
     gpu.read_back_raw();

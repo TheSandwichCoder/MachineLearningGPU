@@ -165,7 +165,7 @@ impl TensorInfo{
 // 4. deriv ping pong buffer 2 (array)
 
 #[derive(Clone)]
-struct ActivityInfo{
+pub struct ActivityInfo{
     pub offset: usize,
     pub a_dim: Vec<usize>,
     pub a_strides: Vec<usize>,
