@@ -34,7 +34,7 @@ impl DataValue{
         let mut value_i = 1;
         while value_i < 3{
             let value = srecord[value_i].parse::<f32>().unwrap();
-            info_vec.push(value / 500.0);
+            info_vec.push(value);
             value_i += 1;
         }
 
@@ -105,7 +105,7 @@ impl DataReader{
         self.n_load_batches = self.dataset_length / self.load_batch_length;
     }
 
-    pub fn initialise_mnist_params(&mut self){
+    pub fn initialise_params_mnist(&mut self){
         self.dataset_length = 42002;
 
         self.data_value_size = 784;

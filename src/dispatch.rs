@@ -56,7 +56,7 @@ pub struct NNDispatch{
 }
 
 impl NNDispatch{
-    pub async fn new(nn_dim: &Vec<usize>, n_batches: u32, data_path: String, data_per_batch: u32) -> Self{
+    pub async fn new(nn_dim: &Vec<usize>, n_batches: u32, data_path: String, data_per_batch: u32, learning_rate: f32) -> Self{
         // GPU stuff
         let instance = wgpu::Instance::default();
         let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default())
@@ -80,7 +80,7 @@ impl NNDispatch{
         let align = device.limits().min_uniform_buffer_offset_alignment as u64;
 
         // ---------------------Neural Network Info---------------------
-        let nn_info = NeuralNetworkInfo::new(nn_dim, n_batches as usize);
+        let nn_info = NeuralNetworkInfo::new(nn_dim, n_batches as usize, learning_rate as f32);
 
         let (p_dir, a_dir) = nn_info.create_dirs();
 
@@ -88,8 +88,8 @@ impl NNDispatch{
 
         // ---------------------Data Reader---------------------
         let mut data_reader = DataReader::new(data_path, (n_batches * data_per_batch) as usize, n_batches as usize);
-        data_reader.initialise_params_testing();
-        data_reader.load_batch_testing();
+        data_reader.initialise_params_mnist();
+        data_reader.load_batch_mnist();
         
         // ---------------------Buffer Stuff---------------------
         let param_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
@@ -106,7 +106,7 @@ impl NNDispatch{
 
         let out_buffer = device.create_buffer(&wgpu::BufferDescriptor{
             label: Some("out_buf"),
-            size: (2048 * std::mem::size_of::<f32>()) as u64,
+            size: (32768 * std::mem::size_of::<f32>()) as u64,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -741,8 +741,8 @@ impl NNDispatch{
                 let dyn_off = batch_i as u32 * self.gradient_pass_info.dir_slot_size as u32;
                 pass.set_bind_group(0, &self.gradient_pass_info.bind_group, &[dyn_off]);
 
-                // pass.dispatch_workgroups(self.nn_info.p_length as u32 / 256 + 1, 256, 1);
-                pass.dispatch_workgroups(self.nn_info.p_length as u32, 1, 1);
+                pass.dispatch_workgroups(self.nn_info.p_length as u32 / 256 + 1, 256, 1);
+                // pass.dispatch_workgroups(self.nn_info.p_length as u32, 1, 1);
             }
         }
 

@@ -28,10 +28,11 @@ fn main() {
     // pollster::block_on(run());
     let mut constructor = ModelConstructor::default();
 
-    constructor.set_nn_dim(&vec![2, 3, 3]);
-    constructor.set_datapath(String::from("./datasets/testing.csv"));
-    constructor.set_epochs(100);
+    constructor.set_nn_dim(&vec![784, 100, 10]);
+    constructor.set_datapath(String::from("./datasets/mnist_numbers.csv"));
+    constructor.set_epochs(10);
     constructor.set_batch(16);
+    constructor.set_lr(0.0001);
 
     let mut nn_model = BasicNNModel::construct(&constructor); 
 
@@ -39,13 +40,13 @@ fn main() {
 
     
     // nn_model.debug();
-    nn_model.test();
+    // nn_model.test();
     
-    nn_model.show_params();
+    // nn_model.show_params();
     nn_model.train();
-    nn_model.show_params();
-
     nn_model.test();
+    // nn_model.show_params();
+
 
     // nn_model.dispatch.read_back_raw(128);
 

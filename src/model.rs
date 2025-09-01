@@ -16,7 +16,7 @@ impl ModelConstructor{
         return ModelConstructor{
             nn_dim: Vec::new(),
             n_batches: 16,
-            n_data_per_batch: 10,
+            n_data_per_batch: 2624,
             n_epochs: 1,
             data_path: String::from(""),
             lr: 0.1,
@@ -54,8 +54,8 @@ pub struct BasicNNModel{
 impl BasicNNModel{
     pub fn construct(constructor: &ModelConstructor) -> Self{
         return BasicNNModel{
-            nn_info: NeuralNetworkInfo::new(&constructor.nn_dim, constructor.n_batches as usize),
-            dispatch: pollster::block_on(NNDispatch::new(&constructor.nn_dim, constructor.n_batches, constructor.data_path.clone(), constructor.n_data_per_batch)),
+            nn_info: NeuralNetworkInfo::new(&constructor.nn_dim, constructor.n_batches as usize, constructor.lr),
+            dispatch: pollster::block_on(NNDispatch::new(&constructor.nn_dim, constructor.n_batches, constructor.data_path.clone(), constructor.n_data_per_batch, constructor.lr)),
             model_info: constructor.clone(),
         }
     }
@@ -69,7 +69,8 @@ impl BasicNNModel{
     }
 
     pub fn debug(&mut self){
-        self.dispatch.data_reader.load_batch_testing();
+        // self.dispatch.data_reader.load_batch_testing();
+        self.dispatch.data_reader.load_batch_mnist();
 
         self.dispatch.set_data();
         
@@ -82,6 +83,9 @@ impl BasicNNModel{
         self.dispatch.apply_gradients();
 
         self.dispatch.read_back_act_single();
+
+        self.dispatch.read_back_params();
+
     }
 
     pub fn train(&mut self){
@@ -92,8 +96,11 @@ impl BasicNNModel{
             self.dispatch.data_reader.reset_counters();
 
             for load_batch_i in 0..self.dispatch.data_reader.n_load_batches{
+
+                println!("load {}/{}", load_batch_i, self.dispatch.data_reader.n_load_batches);
                 // need to load new batch
-                self.dispatch.data_reader.load_batch_testing();
+                // self.dispatch.data_reader.load_batch_testing();
+                self.dispatch.data_reader.load_batch_mnist();
 
                 for sub_batch_i in 0..self.dispatch.data_reader.n_sub_batches{
                     self.dispatch.set_data();
@@ -123,7 +130,8 @@ impl BasicNNModel{
 
         for load_batch_i in 0..self.dispatch.data_reader.n_load_batches{
             // need to load new batch
-            self.dispatch.data_reader.load_batch_testing();
+            // self.dispatch.data_reader.load_batch_testing();
+            self.dispatch.data_reader.load_batch_mnist();
 
             for sub_batch_i in 0..self.dispatch.data_reader.n_sub_batches{
                 self.dispatch.set_data();
@@ -140,5 +148,6 @@ impl BasicNNModel{
         }
 
         self.dispatch.read_back_metrics();
+
     }
 }

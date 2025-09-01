@@ -13,8 +13,8 @@ struct NNDir{
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    // let gradient_i = gid.x * 256 + gid.y;
-    let gradient_i = gid.x;
+    let gradient_i = gid.x * 256 + gid.y;
+    // let gradient_i = gid.x;
 
     if (gradient_i >= nn_dir.n_params){
         return;

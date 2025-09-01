@@ -2,8 +2,6 @@ use bytemuck::{Pod, Zeroable};
 use crate::data_reader::DataReader;
 use rand::Rng;
 
-const lr: f32 = 0.1;
-
 fn activation(z: f32) -> f32{
     return z;
 }
@@ -310,7 +308,7 @@ impl NeuralNetworkInfo{
         return buf;
     }
 
-    pub fn new(nn_dim: &Vec<usize>, n_batches: usize) -> Self{
+    pub fn new(nn_dim: &Vec<usize>, n_batches: usize, learning_rate: f32) -> Self{
         let n_layers = nn_dim.len();
 
         let mut offset = 0;
@@ -349,7 +347,7 @@ impl NeuralNetworkInfo{
             nn_length: offset,
             p_length: p_length,
             n_batches: n_batches,
-            lr: 0.01,
+            lr: learning_rate,
         }
     }
 
@@ -627,7 +625,7 @@ impl ParamsDir{
 
     pub fn create_buffer(&self) -> Vec<f32>{
         // let mut vec1 = Vec::new();
-
+        // return vec![-1.0; self.buffer_size];
         // for i in 0..self.buffer_size{
         //     vec1.push(i as f32 - 6.0);
         // }
@@ -639,7 +637,7 @@ impl ParamsDir{
         let random_floats: Vec<f32> = (0..self.buffer_size)
             .map(|_| rng.gen_range(-1.0..=1.0))
             .collect();
-        
+    
 
         return random_floats;
     }
