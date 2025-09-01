@@ -23,8 +23,6 @@ struct NNDir{
     activation_type: u32,
 };
 
-const lr = 0.1;
-
 @group(0) @binding(0) var<storage, read> params: array<f32>;
 @group(0) @binding(1) var<storage, read_write> activities: array<f32>; 
 @group(0) @binding(2) var <uniform> nn_dir: NNDir;
@@ -49,7 +47,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let z = activities[act_start + nn_dir.curr_layer_start + output_i];
     
-    var act_z = 0.0;
+    var act_z = 1.0;
     
     if (nn_dir.activation_type != 0){
         act_z = derivReLu(z);

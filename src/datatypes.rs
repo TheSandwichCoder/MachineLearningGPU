@@ -1,4 +1,6 @@
 use bytemuck::{Pod, Zeroable};
+use crate::data_reader::DataReader;
+use rand::Rng;
 
 const lr: f32 = 0.1;
 
@@ -347,7 +349,7 @@ impl NeuralNetworkInfo{
             nn_length: offset,
             p_length: p_length,
             n_batches: n_batches,
-            lr: 0.1,
+            lr: 0.01,
         }
     }
 
@@ -403,7 +405,7 @@ impl ForwardDir{
     ) -> Self{
         let activation_type: u32;
 
-        if nn_info.n_layers + 2 == dir_i{
+        if nn_info.n_layers == dir_i + 2{
             activation_type = 0;
         }
         else{
@@ -473,14 +475,14 @@ impl BackwardDir{
             next_layer_length = nn_info.activity_info.a_dim[dir_i + 2] as u32;
         }
 
-        let ping_switch = (dir_i + 1) % 2;
-        let pong_switch = dir_i % 2;
+        let ping_switch = dir_i % 2;
+        let pong_switch = (dir_i + 1) % 2;
 
-        let ping_pong_default = nn_info.activity_info.a_length - nn_info.activity_info.a_deriv_buffer_size;
+        let ping_pong_default = nn_info.activity_info.d_start;
 
         let activation_type: u32;
 
-        if nn_info.n_layers + 2 == dir_i{
+        if nn_info.n_layers - 2 == dir_i{
             activation_type = 0;
         }
         else{
@@ -501,8 +503,8 @@ impl BackwardDir{
             next_layer_start: next_layer_start,
             next_layer_length: next_layer_length,
 
-            ping_start : (ping_pong_default - nn_info.activity_info.a_deriv_buffer_size * ping_switch) as u32,
-            pong_start : (ping_pong_default - nn_info.activity_info.a_deriv_buffer_size * pong_switch) as u32,
+            ping_start : (ping_pong_default + nn_info.activity_info.a_deriv_buffer_size * ping_switch) as u32,
+            pong_start : (ping_pong_default + nn_info.activity_info.a_deriv_buffer_size * pong_switch) as u32,
 
             gradients_start: nn_info.activity_info.g_start as u32 + nn_info.layer_info[dir_i].offset as u32,
             gradient_length: nn_info.activity_info.a_dim[dir_i] as u32 + 1,
@@ -519,9 +521,10 @@ impl BackwardDir{
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct GradientDir{
-    batch_start_i: u32,
+    pub batch_start_i: u32,
     gradient_start_i: u32,
     batch_contribution: f32,
+    n_params: u32,
     lr: f32,
 }
 
@@ -531,11 +534,77 @@ impl GradientDir{
             batch_start_i: nn_info.activity_info.a_length as u32 * dir_i as u32,
             gradient_start_i: nn_info.activity_info.g_start as u32,
             batch_contribution: 1.0 / nn_info.n_batches as f32,
+            n_params: nn_info.p_length as u32,
             lr: nn_info.lr,
         }
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct ErrorDir{
+    act_size: u32,
+    outputs_offset: u32,
+    n_outputs: u32,
+    ping_start: u32,
+    data_size: u32,
+}
+
+impl ErrorDir{
+    pub fn new(nn_info: &NeuralNetworkInfo) -> Self{
+        let last_layer_i = nn_info.n_layers - 1;
+
+        let ping_switch = (last_layer_i - 1) % 2;
+        
+        return ErrorDir{
+            act_size: nn_info.activity_info.a_length as u32,
+            outputs_offset: nn_info.activity_info.a_strides[last_layer_i] as u32,
+            n_outputs: nn_info.activity_info.a_dim[last_layer_i] as u32,
+            ping_start: (nn_info.activity_info.d_start + ping_switch * nn_info.activity_info.a_deriv_buffer_size) as u32,
+            data_size: nn_info.layer_dim[0] as u32, // temporary
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct ErrorPC{
+    layer_idx: u32,
+    _pad1: u32,
+    _pad2: u32,
+    _pad3: u32,
+}
+
+impl ErrorPC{
+    pub fn new(dr: &DataReader) -> Self{
+        return ErrorPC{
+            layer_idx: (dr.load_batch_length * (dr.data_value_size + 1) * dr.load_batch_i + dr.sub_batch_length * (dr.data_value_size + 1) * dr.sub_batch_i) as u32,
+            _pad1: 0,
+            _pad2: 0,
+            _pad3: 0,   
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct TestMetrics{
+    correct: u32,
+    incorrect: u32,
+    _pad1: u32,
+    _pad2: u32,
+}
+
+impl TestMetrics{
+    pub fn zero() -> Self{
+        return TestMetrics{
+             correct: 0,
+             incorrect: 0,
+             _pad1: 0,
+             _pad2: 0,
+        }
+    }
+}
 
 
 pub struct ParamsDir{
@@ -557,8 +626,24 @@ impl ParamsDir{
     }
 
     pub fn create_buffer(&self) -> Vec<f32>{
-        return vec![1.0; self.buffer_size];
+        // let mut vec1 = Vec::new();
+
+        // for i in 0..self.buffer_size{
+        //     vec1.push(i as f32 - 6.0);
+        // }
+
+        // return vec1;
+
+        let mut rng = rand::thread_rng();
+
+        let random_floats: Vec<f32> = (0..self.buffer_size)
+            .map(|_| rng.gen_range(-1.0..=1.0))
+            .collect();
+        
+
+        return random_floats;
     }
+
 }
 
 pub struct ActivityDir{
@@ -596,11 +681,11 @@ impl ActivityDir{
     pub fn create_buffer(&self) -> Vec<f32>{
         let mut v = vec![0.0; self.buffer_size];
 
-        for n in 0..self.n_batches{
-            for i in 0..12{
-                v[n*self.single_buffer_size + 24 + i] = -1.0;
-            }
-        }
+        // for n in 0..self.n_batches{
+        //     for i in 0..12{
+        //         v[n*self.single_buffer_size + 24 + i] = -1.0;
+        //     }
+        // }
 
         return v;
     }

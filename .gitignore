@@ -1,2 +1,3 @@
 /target
 datasets/mnist_numbers.csv
+datasets/testing.csv

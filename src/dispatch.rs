@@ -2,7 +2,7 @@ use std::num::NonZeroU64;
 use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
 
-use crate::datatypes::{NeuralNetworkInfo, ForwardDir, BackwardDir, GradientDir};
+use crate::datatypes::*;
 use crate::data_reader::DataReader;
 
 pub struct NNPassInfo{
@@ -38,15 +38,16 @@ pub struct NNDispatch{
 
     param_buffer: wgpu::Buffer, // holds the params for the model
     act_buffer: wgpu::Buffer, // holds intermediate layer outputs and gradients
-    out_buffer: wgpu::Buffer, // this is only for info that we want (eg. accuracy)
+    out_buffer: wgpu::Buffer, // retrieves parameters and debug stuff
     data_buffer: wgpu::Buffer, // holds current batch of data
+    metric_buffer: wgpu::Buffer, // gets accuracy and metrics
 
 
     forward_pass_info: NNPassInfo,
-
     backward_pass_info: NNPassInfo,
-
     gradient_pass_info: NNPassInfo,
+    error_pass_info: NNPassInfo,
+    test_pass_info: NNPassInfo,
 
     // nn info
     pub nn_info: NeuralNetworkInfo,
@@ -55,16 +56,22 @@ pub struct NNDispatch{
 }
 
 impl NNDispatch{
-    pub async fn new(nn_dim: &Vec<usize>) -> Self{
+    pub async fn new(nn_dim: &Vec<usize>, n_batches: u32, data_path: String, data_per_batch: u32) -> Self{
         // GPU stuff
         let instance = wgpu::Instance::default();
         let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default())
         .await.expect("No GPU adapter found");
 
+        let feats = wgpu::Features::PUSH_CONSTANTS;
+        let limits = wgpu::Limits {
+            max_push_constant_size: 32, // or adapter.limits().max_push_constant_size.min(128)
+            ..wgpu::Limits::default()
+        };
+
         let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("device"),
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::default(),
+            required_features: feats,
+            required_limits: limits,
             memory_hints: wgpu::MemoryHints::Performance, // or Default::default()
             trace: wgpu::Trace::Off,                      // <-- not Option
         })
@@ -73,15 +80,16 @@ impl NNDispatch{
         let align = device.limits().min_uniform_buffer_offset_alignment as u64;
 
         // ---------------------Neural Network Info---------------------
-        let nn_info = NeuralNetworkInfo::new(nn_dim, 32);
+        let nn_info = NeuralNetworkInfo::new(nn_dim, n_batches as usize);
 
         let (p_dir, a_dir) = nn_info.create_dirs();
 
-        // ---------------------Data Reader---------------------
-        let mut data_reader = DataReader::new(String::from("./datasets/mnist_numbers.csv"), 1024);
-        data_reader.initialise_mnist_params();
-        data_reader.load_batch_mnist();
+        let test_metrics = TestMetrics::zero();
 
+        // ---------------------Data Reader---------------------
+        let mut data_reader = DataReader::new(data_path, (n_batches * data_per_batch) as usize, n_batches as usize);
+        data_reader.initialise_params_testing();
+        data_reader.load_batch_testing();
         
         // ---------------------Buffer Stuff---------------------
         let param_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
@@ -98,7 +106,7 @@ impl NNDispatch{
 
         let out_buffer = device.create_buffer(&wgpu::BufferDescriptor{
             label: Some("out_buf"),
-            size: (1024 * std::mem::size_of::<f32>()) as u64,
+            size: (2048 * std::mem::size_of::<f32>()) as u64,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -109,6 +117,12 @@ impl NNDispatch{
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
 
+        let metric_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+            label: Some("metric buffer"),
+            contents: bytemuck::bytes_of(&test_metrics),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        });
+        
         // +--------------------------------------------------------+
         // |                                                        |
         // |                    Forward Pass                        |
@@ -194,8 +208,6 @@ impl NNDispatch{
 
         for layer_i in 0..nn_info.get_n_layers() - 1{
             let forward_dir = ForwardDir::new(&nn_info, layer_i); 
-
-            println!("{}", forward_dir.read_layer_length);
 
             queue.write_buffer(&forward_dir_buffer, layer_i as u64 * forward_slot, bytemuck::bytes_of(&forward_dir));
         }
@@ -328,7 +340,7 @@ impl NNDispatch{
         // |                                                        |
         // +--------------------------------------------------------+
 
-        let gradient_slot   = ((std::mem::size_of::<BackwardDir>() as u64 + align - 1) / align) * align;
+        let gradient_slot   = ((std::mem::size_of::<GradientDir>() as u64 + align - 1) / align) * align;
         let gradient_dir_buffer_size = backward_slot as u64 * nn_info.n_batches as u64;
 
         let gradient_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
@@ -404,6 +416,8 @@ impl NNDispatch{
         for batch_i in 0..nn_info.n_batches{
             let gradient_dir = GradientDir::new(&nn_info, batch_i); 
 
+            println!("{}", gradient_dir.batch_start_i);
+
             queue.write_buffer(&gradient_dir_buffer, batch_i as u64 * gradient_slot, bytemuck::bytes_of(&gradient_dir));
         }
 
@@ -424,9 +438,197 @@ impl NNDispatch{
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
+        // +--------------------------------------------------------+
+        // |                                                        |
+        // |                      Error Pass                        |
+        // |                                                        |
+        // +--------------------------------------------------------+
+
+        let error_slot   = ((std::mem::size_of::<ErrorDir>() as u64 + align - 1) / align) * align;
+        let error_dir_buffer_size = backward_slot as u64 * 1;
+
+        let error_dir = ErrorDir::new(&nn_info);
+
+        let error_dir_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+            label: Some("error_dir_buf"),
+            contents: bytemuck::bytes_of(&error_dir),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+
+        // ---------------------Shader Sources---------------------
+        let wgsl_src = include_str!("shaders/apply_error.wgsl");
+        let error_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+            label: Some("error_shader"),
+            source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
+        });
+
+        // ---------------------Bind Layout---------------------
+        let error_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("error_bind_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<ErrorDir>() as u64),
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let error_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
+            label: Some("bg"),
+            layout: &error_bind_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: act_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: data_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: error_dir_buffer.as_entire_binding() },
+            ],
+        });
+
+        // ---------------------Pipeline Layout---------------------
+
+        let error_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
+            label: Some("error_pipeline_layout"),
+            bind_group_layouts: &[&error_bind_layout],
+            push_constant_ranges: &[wgpu::PushConstantRange{
+                stages: wgpu::ShaderStages::COMPUTE,
+                range: 0..std::mem::size_of::<ErrorPC>() as u32, // bytes
+            }],
+        });
+
+        let error_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("error_pipeline"),
+            layout: Some(&error_pipeline_layout),
+            module: &error_shader,
+            entry_point: Some("main"),
+            cache: None,
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
+        // +--------------------------------------------------------+
+        // |                                                        |
+        // |                    Testing Pass                        |
+        // |                                                        |
+        // +--------------------------------------------------------+
+
+        // ---------------------Shader Sources---------------------
+        let wgsl_src = include_str!("shaders/test_model.wgsl");
+        let test_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+            label: Some("test_shader"),
+            source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
+        });
+
+        // ---------------------Bind Layout---------------------
+        let test_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("test_bind_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage {read_only: false},
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<TestMetrics>() as u64),
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<ErrorDir>() as u64),
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let test_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
+            label: Some("bg"),
+            layout: &test_bind_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: act_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: data_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: metric_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: error_dir_buffer.as_entire_binding() },
+            ],
+        });
+
+        // ---------------------Pipeline Layout---------------------
+
+        let test_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
+            label: Some("test_pipeline_layout"),
+            bind_group_layouts: &[&test_bind_layout],
+            push_constant_ranges: &[wgpu::PushConstantRange{
+                stages: wgpu::ShaderStages::COMPUTE,
+                range: 0..std::mem::size_of::<ErrorPC>() as u32, // bytes
+            }],
+        });
+
+        let test_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("test_pipeline"),
+            layout: Some(&test_pipeline_layout),
+            module: &test_shader,
+            entry_point: Some("main"),
+            cache: None,
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+        
+
+
         let forward_pass_info = NNPassInfo::new(forward_dir_buffer, forward_shader, forward_bind_group, forward_pipeline, forward_slot);
         let backward_pass_info = NNPassInfo::new(backward_dir_buffer, backward_shader, backward_bind_group, backward_pipeline, backward_slot);
         let gradient_pass_info = NNPassInfo::new(gradient_dir_buffer, gradient_shader, gradient_bind_group, gradient_pipeline, gradient_slot);
+        
+        let error_pass_info = NNPassInfo::new(error_dir_buffer.clone(), error_shader, error_bind_group, error_pipeline, error_slot);
+        let test_pass_info = NNPassInfo::new(error_dir_buffer.clone(), test_shader, test_bind_group, test_pipeline, error_slot);
 
 
         println!("SUCCESSFULLY INITIALISED GPU");
@@ -441,10 +643,13 @@ impl NNDispatch{
             act_buffer,
             out_buffer,
             data_buffer,
+            metric_buffer,
 
             forward_pass_info,
             backward_pass_info,
             gradient_pass_info,
+            error_pass_info,
+            test_pass_info,
 
             nn_info,
             data_reader,
@@ -500,7 +705,10 @@ impl NNDispatch{
     pub fn set_data(&self){
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
 
-        let curr_batch_start = self.data_reader.load_batch_i * self.data_reader.load_batch_length * (self.data_reader.data_value_size + 1);
+        let data_slot = (self.data_reader.data_value_size + 1);
+        // let curr_batch_start = self.data_reader.load_batch_i * self.data_reader.load_batch_length * data_slot  + self.data_reader.sub_batch_i * self.data_reader.sub_batch_length * data_slot;
+        let curr_batch_start = self.data_reader.sub_batch_i * self.data_reader.sub_batch_length * data_slot;
+
         for batch_i in 0..self.nn_info.n_batches{
             let write_i = batch_i * self.nn_info.activity_info.a_length;
 
@@ -533,12 +741,72 @@ impl NNDispatch{
                 let dyn_off = batch_i as u32 * self.gradient_pass_info.dir_slot_size as u32;
                 pass.set_bind_group(0, &self.gradient_pass_info.bind_group, &[dyn_off]);
 
+                // pass.dispatch_workgroups(self.nn_info.p_length as u32 / 256 + 1, 256, 1);
                 pass.dispatch_workgroups(self.nn_info.p_length as u32, 1, 1);
             }
         }
 
         let gradient_commands = encoder.finish();
         self.queue.submit([gradient_commands]); 
+    }
+
+    pub fn apply_error(&self){
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("cpass"),
+                timestamp_writes: None,
+            });
+
+            let params = ErrorPC::new(&self.data_reader);
+
+            // println!("{}", params.batch_start_idx);
+
+            pass.set_pipeline(&self.error_pass_info.pipeline);
+
+            pass.set_bind_group(0, &self.error_pass_info.bind_group, &[]);
+
+            pass.set_push_constants(0, bytemuck::bytes_of(&params));
+
+            pass.dispatch_workgroups(self.nn_info.n_batches as u32, 1, 1);
+        }
+
+        let error_commands = encoder.finish();
+        self.queue.submit([error_commands]); 
+    }
+
+    pub fn clear_metrics(&self){
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
+        
+        encoder.clear_buffer(&self.metric_buffer, 0, Some(16));
+
+        let error_commands = encoder.finish();
+        self.queue.submit([error_commands]); 
+    }
+
+    pub fn update_metrics(&self){
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
+        
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("cpass"),
+                timestamp_writes: None,
+            });
+
+            let params = ErrorPC::new(&self.data_reader);
+
+            pass.set_pipeline(&self.test_pass_info.pipeline);
+
+            pass.set_bind_group(0, &self.test_pass_info.bind_group, &[]);
+
+            pass.set_push_constants(0, bytemuck::bytes_of(&params));
+
+            pass.dispatch_workgroups(self.nn_info.n_batches as u32, 1, 1);
+        }
+
+        let error_commands = encoder.finish();
+        self.queue.submit([error_commands]); 
     }
 
     pub fn read_back_params(&self){
@@ -557,6 +825,30 @@ impl NNDispatch{
         let out: &[f32] = bytemuck::cast_slice(&data);
 
         self.nn_info.read_readback(out);
+
+        drop(data);
+        self.out_buffer.unmap();
+    }
+
+    pub fn read_back_metrics(&self){
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
+        
+        encoder.copy_buffer_to_buffer(&self.metric_buffer, 0, &self.out_buffer, 0, 2 as u64 *4);
+
+        self.queue.submit(Some(encoder.finish()));
+
+        let slice = self.out_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| ());
+        self.device.poll(wgpu::PollType::Wait).unwrap();
+
+        // Now it's safe to read.
+        let data = slice.get_mapped_range();
+        let out: &[u32] = bytemuck::cast_slice(&data);
+
+        println!("{:?}", &out[..2]);
+
+        drop(data);
+        self.out_buffer.unmap();
     }
 
     pub fn read_back_data(&self){
@@ -575,12 +867,14 @@ impl NNDispatch{
         let out: &[f32] = bytemuck::cast_slice(&data);
 
         println!("{:?}", out);
+        drop(data);
+        self.out_buffer.unmap();
     }
 
-    pub fn read_back_raw(&self){
+    pub fn read_back_act_single(&self){
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
         
-        encoder.copy_buffer_to_buffer(&self.act_buffer, 0, &self.out_buffer, 0, 1024);
+        encoder.copy_buffer_to_buffer(&self.act_buffer, 0, &self.out_buffer, 0, self.nn_info.activity_info.a_length as u64 *4);
 
         self.queue.submit(Some(encoder.finish()));
 
@@ -592,6 +886,35 @@ impl NNDispatch{
         let data = slice.get_mapped_range();
         let out: &[f32] = bytemuck::cast_slice(&data);
 
-        println!("{:?}", out);
+        println!("v: {:?}", &out[..self.nn_info.activity_info.g_start  as usize]);
+        println!("g: {:?}", &out[self.nn_info.activity_info.g_start as usize..self.nn_info.activity_info.d_start  as usize]);
+        println!("p1: {:?}", &out[self.nn_info.activity_info.d_start as usize..(self.nn_info.activity_info.d_start + self.nn_info.activity_info.a_deriv_buffer_size ) as usize]);
+        println!("p2: {:?}", &out[(self.nn_info.activity_info.d_start + self.nn_info.activity_info.a_deriv_buffer_size) as usize..(self.nn_info.activity_info.d_start + self.nn_info.activity_info.a_deriv_buffer_size * 2) as usize]);
+
+        
+
+        drop(data);
+        self.out_buffer.unmap();
+    }
+
+    pub fn read_back_raw(&self, n_floats: u64){
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
+        
+        encoder.copy_buffer_to_buffer(&self.act_buffer, 0, &self.out_buffer, 0, n_floats*4);
+
+        self.queue.submit(Some(encoder.finish()));
+
+        let slice = self.out_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| ());
+        self.device.poll(wgpu::PollType::Wait).unwrap();
+
+        // Now it's safe to read.
+        let data = slice.get_mapped_range();
+        let out: &[f32] = bytemuck::cast_slice(&data);
+
+        println!("{:?}", &out[..n_floats as usize]);
+
+        drop(data);
+        self.out_buffer.unmap();
     }
 }

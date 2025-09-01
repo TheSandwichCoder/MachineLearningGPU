@@ -3,6 +3,7 @@ struct NNDir{
     batch_start_i: u32,
     gradient_start_i: u32,
     batch_contribution: f32,
+    n_params: u32,
     lr: f32,
 };
 
@@ -12,7 +13,12 @@ struct NNDir{
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    // let gradient_i = gid.x * 256 + gid.y;
     let gradient_i = gid.x;
+
+    if (gradient_i >= nn_dir.n_params){
+        return;
+    }
 
     let batch_start = nn_dir.batch_start_i;
 
