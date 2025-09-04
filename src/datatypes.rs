@@ -374,6 +374,40 @@ impl NeuralNetworkInfo{
             layer_i += 1;
         }
     }
+
+    // pub fn get_save_string(&self, param_slice: &[f32]) -> String{
+    //     let mut layer_i = 0;
+    //     let mut save_string = String::from("");
+
+    //     for layer_i in 0..n_layers{
+    //         save_string += format!("{} ", self.layer_dim[layer_i]);
+    //     }
+
+    //     save_string += "\n";
+
+    //     for layer_info_i in &self.layer_info{
+            
+
+    //         let input_layer_n = self.layer_dim[layer_i];
+    //         let output_layer_n = self.layer_dim[layer_i + 1];
+
+    //         for output_i in 0..output_layer_n{
+    //             let start_i = layer_info_i.offset + output_i * (input_layer_n + 1);
+    //             let end_i = start_i + input_layer_n;
+
+    //             println!("{:?} {}", &param_slice[start_i..end_i], param_slice[end_i]);
+
+    //             save_string += format!("{} {}", param_slice[start_i..end_i].iter().join(" "), param_slice[end_i]);
+
+    //         }
+    //         save_string += "\n";
+    //         layer_i += 1;
+    //     }
+
+    //     return save_string;
+    // }
+
+
 }
 
 
@@ -606,11 +640,11 @@ impl TestMetrics{
 
 
 pub struct ParamsDir{
-    layer_dim: Vec<usize>,
-    n_layers: usize,
+    pub layer_dim: Vec<usize>,
+    pub n_layers: usize,
 
-    param_info: Vec<TensorInfo>,
-    buffer_size: usize,
+    pub param_info: Vec<TensorInfo>,
+    pub buffer_size: usize,
 }
 
 impl ParamsDir{

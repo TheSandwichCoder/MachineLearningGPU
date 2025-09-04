@@ -94,15 +94,16 @@ impl BasicNNModel{
 
         for epoch_i in 0..self.model_info.n_epochs{
             self.dispatch.data_reader.reset_counters();
+            println!("Epoch {}:", epoch_i);
 
             for load_batch_i in 0..self.dispatch.data_reader.n_load_batches{
 
-                println!("load {}/{}", load_batch_i, self.dispatch.data_reader.n_load_batches);
                 // need to load new batch
                 // self.dispatch.data_reader.load_batch_testing();
-                self.dispatch.data_reader.load_batch_mnist();
-
+                // self.dispatch.data_reader.load_batch_mnist();
+                
                 for sub_batch_i in 0..self.dispatch.data_reader.n_sub_batches{
+                    // println!("load {}/{}", sub_batch_i, self.dispatch.data_reader.n_sub_batches);
                     self.dispatch.set_data();
         
                     self.dispatch.forward();
@@ -114,11 +115,13 @@ impl BasicNNModel{
                     self.dispatch.apply_gradients();
         
                     self.dispatch.data_reader.increment_sub_batch();
-                }
 
+                }
+                
                 self.dispatch.data_reader.increment_load_batch();
-    
             }
+
+            self.dispatch.device.poll(wgpu::PollType::Wait).unwrap();
         }
     }
 

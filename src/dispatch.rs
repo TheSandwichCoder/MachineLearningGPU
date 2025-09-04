@@ -31,10 +31,10 @@ impl NNPassInfo{
 
 pub struct NNDispatch{
     // gpu stuff
-    instance: wgpu::Instance,
-    adapter: wgpu::Adapter,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    pub instance: wgpu::Instance,
+    pub adapter: wgpu::Adapter,
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
 
     param_buffer: wgpu::Buffer, // holds the params for the model
     act_buffer: wgpu::Buffer, // holds intermediate layer outputs and gradients
@@ -106,7 +106,7 @@ impl NNDispatch{
 
         let out_buffer = device.create_buffer(&wgpu::BufferDescriptor{
             label: Some("out_buf"),
-            size: (32768 * std::mem::size_of::<f32>()) as u64,
+            size: (p_dir.buffer_size * std::mem::size_of::<f32>()) as u64,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -677,6 +677,7 @@ impl NNDispatch{
 
         let forward_commands = encoder.finish();
         self.queue.submit([forward_commands]);  
+        // self.device.poll(wgpu::PollType::Poll).unwrap();
     }
 
     pub fn backward(&self){
@@ -700,6 +701,7 @@ impl NNDispatch{
 
         let backward_commands = encoder.finish();
         self.queue.submit([backward_commands]); 
+        // self.device.poll(wgpu::PollType::Poll).unwrap();
     }
 
     pub fn set_data(&self){
@@ -830,6 +832,28 @@ impl NNDispatch{
         self.out_buffer.unmap();
     }
 
+    // pub fn read_back_save(&self){
+    //     let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
+        
+    //     encoder.copy_buffer_to_buffer(&self.param_buffer, 0, &self.out_buffer, 0, self.nn_info.p_length as u64 *4);
+
+    //     self.queue.submit(Some(encoder.finish()));
+
+    //     let slice = self.out_buffer.slice(..);
+    //     slice.map_async(wgpu::MapMode::Read, |_| ());
+    //     self.device.poll(wgpu::PollType::Wait).unwrap();
+
+    //     // Now it's safe to read.
+    //     let data = slice.get_mapped_range();
+    //     let out: &[f32] = bytemuck::cast_slice(&data);
+
+        
+
+
+    //     drop(data);
+    //     self.out_buffer.unmap();
+    // }
+
     pub fn read_back_metrics(&self){
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
         
@@ -917,4 +941,6 @@ impl NNDispatch{
         drop(data);
         self.out_buffer.unmap();
     }
+
+    
 }
