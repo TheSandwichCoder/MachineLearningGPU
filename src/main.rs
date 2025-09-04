@@ -31,8 +31,9 @@ fn main() {
     constructor.set_nn_dim(&vec![784, 128, 10]);
     constructor.set_datapath(String::from("./datasets/mnist_numbers.csv"));
     constructor.set_epochs(10);
-    constructor.set_batch(16);
-    constructor.set_lr(0.0001);
+    constructor.set_batch(64);
+    constructor.load_all_data(40000);
+    constructor.set_lr(0.004);
 
     let mut nn_model = BasicNNModel::construct(&constructor); 
 

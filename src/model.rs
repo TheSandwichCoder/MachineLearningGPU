@@ -43,6 +43,10 @@ impl ModelConstructor{
     pub fn set_datapath(&mut self, path: String){
         self.data_path = path;
     }
+
+    pub fn load_all_data(&mut self, n_data: u32){
+        self.n_data_per_batch = n_data / self.n_batches;
+    }
 }
 //./datasets/testing.csv
 
@@ -105,7 +109,7 @@ impl BasicNNModel{
                 
                 for sub_batch_i in 0..self.dispatch.data_reader.n_sub_batches{
                     // println!("load {}/{}", sub_batch_i, self.dispatch.data_reader.n_sub_batches);
-                    // self.dispatch.set_data();
+                    self.dispatch.set_data();
 
 
                     // let now = Instant::now();

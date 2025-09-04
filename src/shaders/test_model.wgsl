@@ -8,7 +8,7 @@ struct NNDir{
 
 struct PC {
   batch_start_idx : u32,
-  _pad1 : u32,
+  n_batches : u32,
   _pad2 : u32,
   _pad3 : u32, // keep 16B alignment friendly; total 16 bytes here
 };
@@ -31,7 +31,7 @@ var<push_constant> pc: PC;
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let batch_i = gid.x;
 
-    if (batch_i >= 16){
+    if (batch_i >= pc.n_batches){
         return;
     }
 

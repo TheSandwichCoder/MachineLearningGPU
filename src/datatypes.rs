@@ -602,16 +602,16 @@ impl ErrorDir{
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct ErrorPC{
     layer_idx: u32,
-    _pad1: u32,
+    n_batches: u32,
     _pad2: u32,
     _pad3: u32,
 }
 
 impl ErrorPC{
-    pub fn new(dr: &DataReader) -> Self{
+    pub fn new(dr: &DataReader, n_batches: usize) -> Self{
         return ErrorPC{
             layer_idx: (dr.load_batch_length * (dr.data_value_size + 1) * dr.load_batch_i + dr.sub_batch_length * (dr.data_value_size + 1) * dr.sub_batch_i) as u32,
-            _pad1: 0,
+            n_batches: n_batches as u32,
             _pad2: 0,
             _pad3: 0,   
         }

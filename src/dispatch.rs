@@ -640,7 +640,7 @@ impl NNDispatch{
         
 
 
-        let forward_pass_info = NNPassInfo::new(forward_dir_buffer, forward_shader, forward_bind_group, forward_pipeline, forward_slot, vec![32, 8, 0]);
+        let forward_pass_info = NNPassInfo::new(forward_dir_buffer, forward_shader, forward_bind_group, forward_pipeline, forward_slot, vec![64, 4, 0]);
         let backward_pass_info = NNPassInfo::new(backward_dir_buffer, backward_shader, backward_bind_group, backward_pipeline, backward_slot, vec![8, 8, 4]);
         
         let gradient_pass_info = NNPassInfo::new(gradient_dir_buffer, gradient_shader, gradient_bind_group, gradient_pipeline, gradient_slot, vec![256, 0, 0]);
@@ -790,7 +790,7 @@ impl NNDispatch{
                 timestamp_writes: None,
             });
 
-            let params = ErrorPC::new(&self.data_reader);
+            let params = ErrorPC::new(&self.data_reader, self.nn_info.n_batches);
 
             // println!("{}", params.batch_start_idx);
 
@@ -827,7 +827,7 @@ impl NNDispatch{
                 timestamp_writes: None,
             });
 
-            let params = ErrorPC::new(&self.data_reader);
+            let params = ErrorPC::new(&self.data_reader, self.nn_info.n_batches);
 
             pass.set_pipeline(&self.test_pass_info.pipeline);
 
