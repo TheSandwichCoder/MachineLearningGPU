@@ -1,5 +1,6 @@
 use crate::dispatch::NNDispatch;
 use crate::datatypes::NeuralNetworkInfo;
+use std::time::{Duration, Instant};
 
 #[derive(Clone)]
 pub struct ModelConstructor{
@@ -104,16 +105,20 @@ impl BasicNNModel{
                 
                 for sub_batch_i in 0..self.dispatch.data_reader.n_sub_batches{
                     // println!("load {}/{}", sub_batch_i, self.dispatch.data_reader.n_sub_batches);
-                    self.dispatch.set_data();
-        
+                    // self.dispatch.set_data();
+
+
+                    // let now = Instant::now();
                     self.dispatch.forward();
-        
+                    
+                    // self.dispatch.queue.on_submitted_work_done().await.unwrap(); // wait for THIS submit and earlier
                     self.dispatch.apply_error();
-        
+                    
                     self.dispatch.backward();
-        
+                    
                     self.dispatch.apply_gradients();
-        
+                    // println!("end-to-end: {:?}", now.elapsed());
+                    
                     self.dispatch.data_reader.increment_sub_batch();
 
                 }
@@ -121,7 +126,7 @@ impl BasicNNModel{
                 self.dispatch.data_reader.increment_load_batch();
             }
 
-            self.dispatch.device.poll(wgpu::PollType::Wait).unwrap();
+            // self.dispatch.device.poll(wgpu::PollType::Wait).unwrap();
         }
     }
 

@@ -5,6 +5,12 @@ use bytemuck::{Pod, Zeroable};
 use crate::datatypes::*;
 use crate::data_reader::DataReader;
 
+struct WorkgroupDim{
+    x: usize,
+    y: usize,
+    z: usize,
+}
+
 pub struct NNPassInfo{
     pub dir_buffer: wgpu::Buffer, // for metas
 
@@ -15,18 +21,29 @@ pub struct NNPassInfo{
     pub pipeline: wgpu::ComputePipeline,
 
     pub dir_slot_size: u64,
+
+    pub workgroup_dim: WorkgroupDim,
 }
 
 impl NNPassInfo{
-    pub fn new(b: wgpu::Buffer, s: wgpu::ShaderModule, bg: wgpu::BindGroup, p: wgpu::ComputePipeline, ss: u64) -> Self{
+    pub fn new(b: wgpu::Buffer, s: wgpu::ShaderModule, bg: wgpu::BindGroup, p: wgpu::ComputePipeline, ss: u64, workgroup_dim: Vec<usize>) -> Self{
         return NNPassInfo{
             dir_buffer: b, // for metas
             shader: s,
             bind_group: bg,
             pipeline: p,
             dir_slot_size: ss,
+            workgroup_dim: WorkgroupDim{
+                x: workgroup_dim[0],
+                y: workgroup_dim[1],
+                z: workgroup_dim[2],
+            },
         }
     }
+}
+
+fn ceil_div(x: usize, y: usize) -> usize{
+    return (x + y - 1) / y;
 }
 
 pub struct NNDispatch{
@@ -623,12 +640,12 @@ impl NNDispatch{
         
 
 
-        let forward_pass_info = NNPassInfo::new(forward_dir_buffer, forward_shader, forward_bind_group, forward_pipeline, forward_slot);
-        let backward_pass_info = NNPassInfo::new(backward_dir_buffer, backward_shader, backward_bind_group, backward_pipeline, backward_slot);
-        let gradient_pass_info = NNPassInfo::new(gradient_dir_buffer, gradient_shader, gradient_bind_group, gradient_pipeline, gradient_slot);
+        let forward_pass_info = NNPassInfo::new(forward_dir_buffer, forward_shader, forward_bind_group, forward_pipeline, forward_slot, vec![32, 8, 0]);
+        let backward_pass_info = NNPassInfo::new(backward_dir_buffer, backward_shader, backward_bind_group, backward_pipeline, backward_slot, vec![8, 8, 4]);
         
-        let error_pass_info = NNPassInfo::new(error_dir_buffer.clone(), error_shader, error_bind_group, error_pipeline, error_slot);
-        let test_pass_info = NNPassInfo::new(error_dir_buffer.clone(), test_shader, test_bind_group, test_pipeline, error_slot);
+        let gradient_pass_info = NNPassInfo::new(gradient_dir_buffer, gradient_shader, gradient_bind_group, gradient_pipeline, gradient_slot, vec![256, 0, 0]);
+        let error_pass_info = NNPassInfo::new(error_dir_buffer.clone(), error_shader, error_bind_group, error_pipeline, error_slot, vec![64, 0, 0]);
+        let test_pass_info = NNPassInfo::new(error_dir_buffer.clone(), test_shader, test_bind_group, test_pipeline, error_slot, vec![64, 0, 0]);
 
 
         println!("SUCCESSFULLY INITIALISED GPU");
@@ -671,13 +688,18 @@ impl NNDispatch{
                 let dyn_off = layer_i as u32 * self.forward_pass_info.dir_slot_size as u32;
                 pass.set_bind_group(0, &self.forward_pass_info.bind_group, &[dyn_off]);
 
-                pass.dispatch_workgroups(self.nn_info.get_dim_n(layer_i + 1) as u32, self.nn_info.get_n_batches() as u32, 1);
+                // println!("{} {}", self.forward_pass_info.workgroup_dim.x, self.forward_pass_info.workgroup_dim.y);
+
+                let wx = ceil_div(self.nn_info.get_dim_n(layer_i + 1), self.forward_pass_info.workgroup_dim.x);
+                let wy = ceil_div(self.nn_info.get_n_batches(), self.forward_pass_info.workgroup_dim.y);
+
+                pass.dispatch_workgroups(wx as u32, wy as u32, 1);
             }
         }
 
         let forward_commands = encoder.finish();
         self.queue.submit([forward_commands]);  
-        // self.device.poll(wgpu::PollType::Poll).unwrap();
+        // self.device.poll(wgpu::PollType::Wait).unwrap();
     }
 
     pub fn backward(&self){
@@ -694,8 +716,13 @@ impl NNDispatch{
             for layer_i in (0..(self.nn_info.get_n_layers() - 1)).rev(){
                 let dyn_off = layer_i as u32 * self.backward_pass_info.dir_slot_size as u32;
                 pass.set_bind_group(0, &self.backward_pass_info.bind_group, &[dyn_off]);
+                // println!("{} {} {}", self.forward_pass_info.workgroup_dim.x, self.forward_pass_info.workgroup_dim.y,self.forward_pass_info.workgroup_dim.z );
 
-                pass.dispatch_workgroups(self.nn_info.get_dim_n(layer_i + 1) as u32, self.nn_info.get_dim_n(layer_i) as u32 + 1, self.nn_info.get_n_batches() as u32);
+                let wx = ceil_div(self.nn_info.get_dim_n(layer_i + 1), self.backward_pass_info.workgroup_dim.x);
+                let wy = ceil_div(self.nn_info.get_dim_n(layer_i) + 1, self.backward_pass_info.workgroup_dim.y);
+                let wz = ceil_div(self.nn_info.get_n_batches(), self.backward_pass_info.workgroup_dim.z);
+
+                pass.dispatch_workgroups(wx as u32, wy as u32, wz as u32);
             }
         }
 
@@ -743,7 +770,9 @@ impl NNDispatch{
                 let dyn_off = batch_i as u32 * self.gradient_pass_info.dir_slot_size as u32;
                 pass.set_bind_group(0, &self.gradient_pass_info.bind_group, &[dyn_off]);
 
-                pass.dispatch_workgroups(self.nn_info.p_length as u32 / 256 + 1, 256, 1);
+                let wx = ceil_div(self.nn_info.p_length , self.gradient_pass_info.workgroup_dim.x);
+
+                pass.dispatch_workgroups(wx as u32, 1, 1);
                 // pass.dispatch_workgroups(self.nn_info.p_length as u32, 1, 1);
             }
         }
@@ -771,7 +800,9 @@ impl NNDispatch{
 
             pass.set_push_constants(0, bytemuck::bytes_of(&params));
 
-            pass.dispatch_workgroups(self.nn_info.n_batches as u32, 1, 1);
+            let wx = ceil_div(self.nn_info.n_batches, self.error_pass_info.workgroup_dim.x);
+
+            pass.dispatch_workgroups(wx as u32, 1, 1);
         }
 
         let error_commands = encoder.finish();
@@ -804,7 +835,9 @@ impl NNDispatch{
 
             pass.set_push_constants(0, bytemuck::bytes_of(&params));
 
-            pass.dispatch_workgroups(self.nn_info.n_batches as u32, 1, 1);
+            let gx = ceil_div(self.nn_info.n_batches, self.test_pass_info.workgroup_dim.x);
+
+            pass.dispatch_workgroups(gx as u32, 1, 1);
         }
 
         let error_commands = encoder.finish();
