@@ -1,4 +1,5 @@
 use bytemuck::{Pod, Zeroable};
+use itertools::Itertools;
 use crate::data_reader::DataReader;
 use rand::Rng;
 
@@ -247,6 +248,7 @@ pub struct NeuralNetworkInfo{
     pub p_length: usize,
     pub n_batches: usize,
     pub lr: f32,
+    pub mr: f32,
 }
 
 impl NeuralNetworkInfo{
@@ -260,6 +262,7 @@ impl NeuralNetworkInfo{
             p_length: 0,
             n_batches: 0,
             lr: 0.0,
+            mr: 0.0, 
         }
     }
 
@@ -308,7 +311,7 @@ impl NeuralNetworkInfo{
         return buf;
     }
 
-    pub fn new(nn_dim: &Vec<usize>, n_batches: usize, learning_rate: f32) -> Self{
+    pub fn new(nn_dim: &Vec<usize>, n_batches: usize, learning_rate: f32, momentum_rate: f32) -> Self{
         let n_layers = nn_dim.len();
 
         let mut offset = 0;
@@ -348,6 +351,7 @@ impl NeuralNetworkInfo{
             p_length: p_length,
             n_batches: n_batches,
             lr: learning_rate,
+            mr: momentum_rate,
         }
     }
 
@@ -375,37 +379,36 @@ impl NeuralNetworkInfo{
         }
     }
 
-    // pub fn get_save_string(&self, param_slice: &[f32]) -> String{
-    //     let mut layer_i = 0;
-    //     let mut save_string = String::from("");
+    pub fn get_save_string(&self, param_slice: &[f32]) -> String{
+        let mut layer_i = 0;
+        let mut save_string = String::from("");
 
-    //     for layer_i in 0..n_layers{
-    //         save_string += format!("{} ", self.layer_dim[layer_i]);
-    //     }
+        for layer_i in 0..self.n_layers{
+            save_string += &format!("{} ", self.layer_dim[layer_i]);
+        }
 
-    //     save_string += "\n";
+        save_string += "\n";
 
-    //     for layer_info_i in &self.layer_info{
+        for layer_info_i in &self.layer_info{
             
 
-    //         let input_layer_n = self.layer_dim[layer_i];
-    //         let output_layer_n = self.layer_dim[layer_i + 1];
+            let input_layer_n = self.layer_dim[layer_i];
+            let output_layer_n = self.layer_dim[layer_i + 1];
 
-    //         for output_i in 0..output_layer_n{
-    //             let start_i = layer_info_i.offset + output_i * (input_layer_n + 1);
-    //             let end_i = start_i + input_layer_n;
+            for output_i in 0..output_layer_n{
+                let start_i = layer_info_i.offset + output_i * (input_layer_n + 1);
+                let end_i = start_i + input_layer_n;
 
-    //             println!("{:?} {}", &param_slice[start_i..end_i], param_slice[end_i]);
+                // println!("{:?} {}", &param_slice[start_i..end_i], param_slice[end_i]);
 
-    //             save_string += format!("{} {}", param_slice[start_i..end_i].iter().join(" "), param_slice[end_i]);
+                save_string += &format!("{} {}\n", param_slice[start_i..end_i].iter().join(" "), param_slice[end_i]);
 
-    //         }
-    //         save_string += "\n";
-    //         layer_i += 1;
-    //     }
+            }
+            layer_i += 1;
+        }
 
-    //     return save_string;
-    // }
+        return save_string;
+    }
 
 
 }
@@ -554,20 +557,24 @@ impl BackwardDir{
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct GradientDir{
     pub batch_start_i: u32,
+    batch_i: u32,
     gradient_start_i: u32,
     batch_contribution: f32,
     n_params: u32,
     lr: f32,
+    mr: f32,
 }
 
 impl GradientDir{
     pub fn new(nn_info : &NeuralNetworkInfo, dir_i: usize) -> Self{
         return GradientDir{
             batch_start_i: nn_info.activity_info.a_length as u32 * dir_i as u32,
+            batch_i: dir_i as u32,
             gradient_start_i: nn_info.activity_info.g_start as u32,
             batch_contribution: 1.0 / nn_info.n_batches as f32,
             n_params: nn_info.p_length as u32,
             lr: nn_info.lr,
+            mr: nn_info.mr,
         }
     }
 }
@@ -657,15 +664,11 @@ impl ParamsDir{
         }
     }
 
+    pub fn create_buffer_empty(&self) -> Vec<f32>{
+        return vec![0.0; self.buffer_size];
+    }
+
     pub fn create_buffer(&self) -> Vec<f32>{
-        // let mut vec1 = Vec::new();
-        // return vec![-1.0; self.buffer_size];
-        // for i in 0..self.buffer_size{
-        //     vec1.push(i as f32 - 6.0);
-        // }
-
-        // return vec1;
-
         let mut rng = rand::thread_rng();
 
         let random_floats: Vec<f32> = (0..self.buffer_size)

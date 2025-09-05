@@ -31,6 +31,8 @@ var<push_constant> pc: PC;
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let batch_i = gid.x;
 
+    
+
     if (batch_i >= pc.n_batches){
         return;
     }
@@ -44,7 +46,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let predicted_label = get_max(output_start_i);
     
-
     if (predicted_label == label){
         atomicAdd(&metrics.correct, 1u);
     }

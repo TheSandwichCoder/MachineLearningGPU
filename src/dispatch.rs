@@ -1,6 +1,7 @@
 use std::num::NonZeroU64;
 use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
+use std::fs;
 
 use crate::datatypes::*;
 use crate::data_reader::DataReader;
@@ -54,6 +55,8 @@ pub struct NNDispatch{
     pub queue: wgpu::Queue,
 
     param_buffer: wgpu::Buffer, // holds the params for the model
+    gradient_buffer: wgpu::Buffer, // holds the param gradients
+    momentum_buffer: wgpu::Buffer, // holds the param momentum
     act_buffer: wgpu::Buffer, // holds intermediate layer outputs and gradients
     out_buffer: wgpu::Buffer, // retrieves parameters and debug stuff
     data_buffer: wgpu::Buffer, // holds current batch of data
@@ -63,6 +66,7 @@ pub struct NNDispatch{
     forward_pass_info: NNPassInfo,
     backward_pass_info: NNPassInfo,
     gradient_pass_info: NNPassInfo,
+    momentum_pass_info: NNPassInfo,
     error_pass_info: NNPassInfo,
     test_pass_info: NNPassInfo,
 
@@ -73,7 +77,7 @@ pub struct NNDispatch{
 }
 
 impl NNDispatch{
-    pub async fn new(nn_dim: &Vec<usize>, n_batches: u32, data_path: String, data_per_batch: u32, learning_rate: f32) -> Self{
+    pub async fn new(nn_dim: &Vec<usize>, n_batches: u32, data_path: String, data_per_batch: u32, learning_rate: f32, momentum_rate: f32) -> Self{
         // GPU stuff
         let instance = wgpu::Instance::default();
         let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default())
@@ -97,7 +101,7 @@ impl NNDispatch{
         let align = device.limits().min_uniform_buffer_offset_alignment as u64;
 
         // ---------------------Neural Network Info---------------------
-        let nn_info = NeuralNetworkInfo::new(nn_dim, n_batches as usize, learning_rate as f32);
+        let nn_info = NeuralNetworkInfo::new(nn_dim, n_batches as usize, learning_rate, momentum_rate);
 
         let (p_dir, a_dir) = nn_info.create_dirs();
 
@@ -114,7 +118,21 @@ impl NNDispatch{
             contents: bytemuck::cast_slice(&p_dir.create_buffer()),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
+        let gradient_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+            label: Some("gradient buffer"),
+            contents: bytemuck::cast_slice(&p_dir.create_buffer_empty()),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        });
+        
+        let momentum_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+            label: Some("momentum buffer"),
+            contents: bytemuck::cast_slice(&p_dir.create_buffer_empty()),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        });
 
+
+
+            
         let act_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("activities buffer"),
             contents: bytemuck::cast_slice(&a_dir.create_buffer()),
@@ -358,7 +376,7 @@ impl NNDispatch{
         // +--------------------------------------------------------+
 
         let gradient_slot   = ((std::mem::size_of::<GradientDir>() as u64 + align - 1) / align) * align;
-        let gradient_dir_buffer_size = backward_slot as u64 * nn_info.n_batches as u64;
+        let gradient_dir_buffer_size = gradient_slot as u64 * nn_info.n_batches as u64;
 
         let gradient_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
             label: Some("gradient_dir_buf"),
@@ -371,7 +389,7 @@ impl NNDispatch{
         let gradient_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
             buffer: &gradient_dir_buffer,
             offset: 0,
-            size: Some(wgpu::BufferSize::new(backward_slot).unwrap()),
+            size: Some(wgpu::BufferSize::new(gradient_slot).unwrap()),
         });
 
         // ---------------------Shader Sources---------------------
@@ -422,7 +440,7 @@ impl NNDispatch{
             label: Some("bg"),
             layout: &gradient_bind_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: param_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: gradient_buffer.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: act_buffer.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 2, resource: gradient_dir_binding },
             ],
@@ -432,8 +450,6 @@ impl NNDispatch{
 
         for batch_i in 0..nn_info.n_batches{
             let gradient_dir = GradientDir::new(&nn_info, batch_i); 
-
-            println!("{}", gradient_dir.batch_start_i);
 
             queue.write_buffer(&gradient_dir_buffer, batch_i as u64 * gradient_slot, bytemuck::bytes_of(&gradient_dir));
         }
@@ -450,6 +466,120 @@ impl NNDispatch{
             label: Some("gradient_pipeline"),
             layout: Some(&gradient_pipeline_layout),
             module: &gradient_shader,
+            entry_point: Some("main"),
+            cache: None,
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
+        // +--------------------------------------------------------+
+        // |                                                        |
+        // |                    Momentum Pass                       |
+        // |                                                        |
+        // +--------------------------------------------------------+
+
+        let momentum_slot   = ((std::mem::size_of::<GradientDir>() as u64 + align - 1) / align) * align;
+        let momentum_dir_buffer_size = momentum_slot as u64 * nn_info.n_batches as u64;
+
+        let momentum_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
+            label: Some("momentum_dir_buf"),
+            size: momentum_dir_buffer_size,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // ---------------------Special Binding---------------------
+        let momentum_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &momentum_dir_buffer,
+            offset: 0,
+            size: Some(wgpu::BufferSize::new(momentum_slot).unwrap()),
+        });
+
+        // ---------------------Shader Sources---------------------
+        let wgsl_src = include_str!("shaders/apply_momentum.wgsl");
+        let momentum_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+            label: Some("momentum_shader"),
+            source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
+        });
+
+        // ---------------------Bind Layout---------------------
+        let momentum_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("momentum_bind_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<GradientDir>() as u64),
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let momentum_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
+            label: Some("bg"),
+            layout: &momentum_bind_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: param_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: momentum_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: gradient_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: momentum_dir_binding },
+            ],
+        });
+
+        // ---------------------Update Meta---------------------
+
+        for batch_i in 0..nn_info.n_batches{
+            let momentum_dir = GradientDir::new(&nn_info, batch_i); 
+
+            queue.write_buffer(&momentum_dir_buffer, batch_i as u64 * momentum_slot, bytemuck::bytes_of(&momentum_dir));
+        }
+
+
+        // ---------------------Pipeline Layout---------------------
+
+        let momentum_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
+            label: Some("momentum_pipeline_layout"),
+            bind_group_layouts: &[&momentum_bind_layout],
+            push_constant_ranges: &[],
+        });
+
+        let momentum_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("momentum_pipeline"),
+            layout: Some(&momentum_pipeline_layout),
+            module: &momentum_shader,
             entry_point: Some("main"),
             cache: None,
             compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -644,6 +774,8 @@ impl NNDispatch{
         let backward_pass_info = NNPassInfo::new(backward_dir_buffer, backward_shader, backward_bind_group, backward_pipeline, backward_slot, vec![8, 8, 4]);
         
         let gradient_pass_info = NNPassInfo::new(gradient_dir_buffer, gradient_shader, gradient_bind_group, gradient_pipeline, gradient_slot, vec![256, 0, 0]);
+        let momentum_pass_info = NNPassInfo::new(momentum_dir_buffer, momentum_shader, momentum_bind_group, momentum_pipeline, momentum_slot, vec![256, 0, 0]);
+
         let error_pass_info = NNPassInfo::new(error_dir_buffer.clone(), error_shader, error_bind_group, error_pipeline, error_slot, vec![64, 0, 0]);
         let test_pass_info = NNPassInfo::new(error_dir_buffer.clone(), test_shader, test_bind_group, test_pipeline, error_slot, vec![64, 0, 0]);
 
@@ -657,6 +789,8 @@ impl NNDispatch{
             queue,
 
             param_buffer,
+            gradient_buffer,
+            momentum_buffer,
             act_buffer,
             out_buffer,
             data_buffer,
@@ -665,6 +799,7 @@ impl NNDispatch{
             forward_pass_info,
             backward_pass_info,
             gradient_pass_info,
+            momentum_pass_info,
             error_pass_info,
             test_pass_info,
 
@@ -690,10 +825,10 @@ impl NNDispatch{
 
                 // println!("{} {}", self.forward_pass_info.workgroup_dim.x, self.forward_pass_info.workgroup_dim.y);
 
-                let wx = ceil_div(self.nn_info.get_dim_n(layer_i + 1), self.forward_pass_info.workgroup_dim.x);
-                let wy = ceil_div(self.nn_info.get_n_batches(), self.forward_pass_info.workgroup_dim.y);
+                let gx = ceil_div(self.nn_info.get_dim_n(layer_i + 1), self.forward_pass_info.workgroup_dim.x);
+                let gy = ceil_div(self.nn_info.get_n_batches(), self.forward_pass_info.workgroup_dim.y);
 
-                pass.dispatch_workgroups(wx as u32, wy as u32, 1);
+                pass.dispatch_workgroups(gx as u32, gy as u32, 1);
             }
         }
 
@@ -718,11 +853,11 @@ impl NNDispatch{
                 pass.set_bind_group(0, &self.backward_pass_info.bind_group, &[dyn_off]);
                 // println!("{} {} {}", self.forward_pass_info.workgroup_dim.x, self.forward_pass_info.workgroup_dim.y,self.forward_pass_info.workgroup_dim.z );
 
-                let wx = ceil_div(self.nn_info.get_dim_n(layer_i + 1), self.backward_pass_info.workgroup_dim.x);
-                let wy = ceil_div(self.nn_info.get_dim_n(layer_i) + 1, self.backward_pass_info.workgroup_dim.y);
+                let gx = ceil_div(self.nn_info.get_dim_n(layer_i + 1), self.backward_pass_info.workgroup_dim.x);
+                let gy = ceil_div(self.nn_info.get_dim_n(layer_i) + 1, self.backward_pass_info.workgroup_dim.y);
                 let wz = ceil_div(self.nn_info.get_n_batches(), self.backward_pass_info.workgroup_dim.z);
 
-                pass.dispatch_workgroups(wx as u32, wy as u32, wz as u32);
+                pass.dispatch_workgroups(gx as u32, gy as u32, wz as u32);
             }
         }
 
@@ -755,7 +890,32 @@ impl NNDispatch{
         self.queue.submit([encoder.finish()]);
     }
 
-    pub fn apply_gradients(&self){
+    pub fn update_momentum(&self){
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("cpass"),
+                timestamp_writes: None,
+            });
+
+            pass.set_pipeline(&self.momentum_pass_info.pipeline);
+
+            for batch_i in 0..self.nn_info.n_batches{
+                let dyn_off = batch_i as u32 * self.momentum_pass_info.dir_slot_size as u32;
+                pass.set_bind_group(0, &self.momentum_pass_info.bind_group, &[dyn_off]);
+
+                let gx = ceil_div(self.nn_info.p_length , self.momentum_pass_info.workgroup_dim.x);
+
+                pass.dispatch_workgroups(gx as u32, 1, 1);
+            }
+        }
+
+        let momentum_commands = encoder.finish();
+        self.queue.submit([momentum_commands]); 
+    }
+
+    pub fn update_gradients(&self){
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
 
         {
@@ -770,10 +930,9 @@ impl NNDispatch{
                 let dyn_off = batch_i as u32 * self.gradient_pass_info.dir_slot_size as u32;
                 pass.set_bind_group(0, &self.gradient_pass_info.bind_group, &[dyn_off]);
 
-                let wx = ceil_div(self.nn_info.p_length , self.gradient_pass_info.workgroup_dim.x);
+                let gx = ceil_div(self.nn_info.p_length , self.gradient_pass_info.workgroup_dim.x);
 
-                pass.dispatch_workgroups(wx as u32, 1, 1);
-                // pass.dispatch_workgroups(self.nn_info.p_length as u32, 1, 1);
+                pass.dispatch_workgroups(gx as u32, 1, 1);
             }
         }
 
@@ -800,9 +959,9 @@ impl NNDispatch{
 
             pass.set_push_constants(0, bytemuck::bytes_of(&params));
 
-            let wx = ceil_div(self.nn_info.n_batches, self.error_pass_info.workgroup_dim.x);
+            let gx = ceil_div(self.nn_info.n_batches, self.error_pass_info.workgroup_dim.x);
 
-            pass.dispatch_workgroups(wx as u32, 1, 1);
+            pass.dispatch_workgroups(gx as u32, 1, 1);
         }
 
         let error_commands = encoder.finish();
@@ -865,27 +1024,30 @@ impl NNDispatch{
         self.out_buffer.unmap();
     }
 
-    // pub fn read_back_save(&self){
-    //     let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
+    pub fn read_back_save(&self){
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
         
-    //     encoder.copy_buffer_to_buffer(&self.param_buffer, 0, &self.out_buffer, 0, self.nn_info.p_length as u64 *4);
+        encoder.copy_buffer_to_buffer(&self.param_buffer, 0, &self.out_buffer, 0, self.nn_info.p_length as u64 *4);
 
-    //     self.queue.submit(Some(encoder.finish()));
+        self.queue.submit(Some(encoder.finish()));
 
-    //     let slice = self.out_buffer.slice(..);
-    //     slice.map_async(wgpu::MapMode::Read, |_| ());
-    //     self.device.poll(wgpu::PollType::Wait).unwrap();
+        let slice = self.out_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| ());
+        self.device.poll(wgpu::PollType::Wait).unwrap();
 
-    //     // Now it's safe to read.
-    //     let data = slice.get_mapped_range();
-    //     let out: &[f32] = bytemuck::cast_slice(&data);
+        // Now it's safe to read.
+        let data = slice.get_mapped_range();
+        let out: &[f32] = bytemuck::cast_slice(&data);
 
         
+        let save_string = self.nn_info.get_save_string(out);
+        
+        fs::write("./saves/saved_nn.txt", save_string);
 
 
-    //     drop(data);
-    //     self.out_buffer.unmap();
-    // }
+        drop(data);
+        self.out_buffer.unmap();
+    }
 
     pub fn read_back_metrics(&self){
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });

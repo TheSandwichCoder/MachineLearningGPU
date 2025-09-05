@@ -10,6 +10,7 @@ pub struct ModelConstructor{
     pub n_epochs: u32,
     pub data_path: String,
     pub lr: f32,
+    pub mr: f32,
 }
 
 impl ModelConstructor{
@@ -21,6 +22,7 @@ impl ModelConstructor{
             n_epochs: 1,
             data_path: String::from(""),
             lr: 0.1,
+            mr: 0.9
         }
     }
 
@@ -59,8 +61,8 @@ pub struct BasicNNModel{
 impl BasicNNModel{
     pub fn construct(constructor: &ModelConstructor) -> Self{
         return BasicNNModel{
-            nn_info: NeuralNetworkInfo::new(&constructor.nn_dim, constructor.n_batches as usize, constructor.lr),
-            dispatch: pollster::block_on(NNDispatch::new(&constructor.nn_dim, constructor.n_batches, constructor.data_path.clone(), constructor.n_data_per_batch, constructor.lr)),
+            nn_info: NeuralNetworkInfo::new(&constructor.nn_dim, constructor.n_batches as usize, constructor.lr, constructor.mr),
+            dispatch: pollster::block_on(NNDispatch::new(&constructor.nn_dim, constructor.n_batches, constructor.data_path.clone(), constructor.n_data_per_batch, constructor.lr, constructor.mr)),
             model_info: constructor.clone(),
         }
     }
@@ -71,6 +73,10 @@ impl BasicNNModel{
 
     pub fn show_params(&mut self){
         self.dispatch.read_back_params();
+    }
+
+    pub fn save(&self){
+        self.dispatch.read_back_save();
     }
 
     pub fn debug(&mut self){
@@ -84,8 +90,6 @@ impl BasicNNModel{
         self.dispatch.apply_error();
 
         self.dispatch.backward();
-
-        self.dispatch.apply_gradients();
 
         self.dispatch.read_back_act_single();
 
@@ -104,41 +108,34 @@ impl BasicNNModel{
             for load_batch_i in 0..self.dispatch.data_reader.n_load_batches{
 
                 // need to load new batch
-                // self.dispatch.data_reader.load_batch_testing();
                 // self.dispatch.data_reader.load_batch_mnist();
                 
                 for sub_batch_i in 0..self.dispatch.data_reader.n_sub_batches{
-                    // println!("load {}/{}", sub_batch_i, self.dispatch.data_reader.n_sub_batches);
                     self.dispatch.set_data();
 
-
-                    // let now = Instant::now();
                     self.dispatch.forward();
                     
-                    // self.dispatch.queue.on_submitted_work_done().await.unwrap(); // wait for THIS submit and earlier
                     self.dispatch.apply_error();
                     
                     self.dispatch.backward();
-                    
-                    self.dispatch.apply_gradients();
-                    // println!("end-to-end: {:?}", now.elapsed());
+
+                    self.dispatch.update_gradients();
+                    self.dispatch.update_momentum();
                     
                     self.dispatch.data_reader.increment_sub_batch();
-
                 }
                 
                 self.dispatch.data_reader.increment_load_batch();
             }
-
-            // self.dispatch.device.poll(wgpu::PollType::Wait).unwrap();
+            self.dispatch.device.poll(wgpu::PollType::Wait).unwrap();
         }
     }
 
     // get this to work with testing data 
     pub fn test(&mut self){
+        println!("ajksdhfjad");
         self.dispatch.data_reader.reset_counters();
         self.dispatch.clear_metrics();
-        println!("asdfasdf {} {}", self.dispatch.data_reader.n_load_batches, self.dispatch.data_reader.n_sub_batches);
 
         for load_batch_i in 0..self.dispatch.data_reader.n_load_batches{
             // need to load new batch

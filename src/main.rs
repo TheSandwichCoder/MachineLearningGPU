@@ -28,12 +28,13 @@ fn main() {
     // pollster::block_on(run());
     let mut constructor = ModelConstructor::default();
 
-    constructor.set_nn_dim(&vec![784, 128, 10]);
+    constructor.set_nn_dim(&vec![784, 128, 64, 10]);
     constructor.set_datapath(String::from("./datasets/mnist_numbers.csv"));
     constructor.set_epochs(10);
     constructor.set_batch(64);
     constructor.load_all_data(40000);
-    constructor.set_lr(0.004);
+    constructor.set_lr(0.0004);
+    constructor.set_mr(0.9);
 
     let mut nn_model = BasicNNModel::construct(&constructor); 
 
@@ -46,30 +47,8 @@ fn main() {
     // nn_model.show_params();
     nn_model.train();
     nn_model.test();
-    // nn_model.show_params();
 
-
-    // nn_model.dispatch.read_back_raw(128);
-
-    // nn_model.debug();
-
-    // let mut gpu = pollster::block_on(NNDispatch::new(&vec![2, 3, 2]));
-    // gpu.nn_info.show_all_specs();
-
-    
-
-    // gpu.set_data();
-
-    // gpu.forward();
-    
-    // gpu.apply_error();
-
-    // gpu.backward();
-
-    // gpu.apply_gradients();
-    // // gpu.read_back_raw(36*2);
-    // gpu.read_back_params();
-
+    nn_model.save();
 
 
 }

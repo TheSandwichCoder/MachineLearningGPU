@@ -52,17 +52,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (nn_dir.activation_type != 0){
         act_z = derivReLu(z);
     }
-
-    // reset the gradients and derivatives
-    activities[act_start + output_gradient_start + input_i] = 0.0;
-
-    if (input_i < nn_dir.prev_layer_length){
-        activities[act_start + output_deriv_start + input_i] = 0.0;
-    }
     
+    let part_deriv_offset = act_start + input_deriv_start + output_i;
+
+    var new_gradient = 0.0;
+    var new_deriv = 0.0;
 
     for (var der_i: u32 = 0; der_i < nn_dir.next_layer_length; der_i++){
-        let part_deriv = activities[act_start + input_deriv_start + der_i * nn_dir.curr_layer_length + output_i];
+        let part_deriv = activities[part_deriv_offset + der_i * nn_dir.curr_layer_length];
         
         // weights
         if (input_i < nn_dir.prev_layer_length){
@@ -72,16 +69,19 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             let gradient_value = act_z * part_deriv * prev_act_info;
             let deriv_value = act_z * part_deriv * curr_act_info;
 
-            activities[act_start + output_gradient_start + input_i] += gradient_value;
-
-            activities[act_start + output_deriv_start + input_i] += deriv_value;
+            new_gradient += gradient_value;
+            new_deriv += deriv_value;
         }
 
         // bias
         else{
-            activities[act_start + output_gradient_start + input_i] += part_deriv;
+            new_gradient += part_deriv;
         }
     }
+
+    activities[act_start + output_gradient_start + input_i] = new_gradient;
+    activities[act_start + output_deriv_start + input_i] = new_deriv;
+
 }
 
 fn derivReLu(x: f32) -> f32{
