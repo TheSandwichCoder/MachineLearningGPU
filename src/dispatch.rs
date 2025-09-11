@@ -64,6 +64,8 @@ pub struct NNDispatch{
 
 
     forward_pass_info: NNPassInfo,
+    forward_mat_pass_info: NNPassInfo,
+
     backward_pass_info: NNPassInfo,
     gradient_pass_info: NNPassInfo,
     momentum_pass_info: NNPassInfo,
@@ -164,7 +166,6 @@ impl NNDispatch{
         // |                                                        |
         // +--------------------------------------------------------+
 
-
         let forward_slot   = ((std::mem::size_of::<ForwardDir>() as u64 + align - 1) / align) * align;
         let forward_dir_buffer_size = forward_slot * (nn_info.get_n_layers() - 1) as u64;
 
@@ -264,7 +265,110 @@ impl NNDispatch{
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
+        // +--------------------------------------------------------+
+        // |                                                        |
+        // |                   Forward Mat Pass                     |
+        // |                                                        |
+        // +--------------------------------------------------------+
 
+        let forward_mat_slot   = ((std::mem::size_of::<MatrixDir>() as u64 + align - 1) / align) * align;
+        let forward_mat_dir_buffer_size = forward_mat_slot * (nn_info.get_n_layers() - 1) as u64;
+
+        let forward_mat_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
+            label: Some("nn_dir_buf"),
+            size: forward_mat_dir_buffer_size,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // ---------------------Special Binding---------------------
+        let forward_mat_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &forward_mat_dir_buffer,
+            offset: 0,
+            size: Some(wgpu::BufferSize::new(forward_mat_slot).unwrap()),
+        });
+
+
+        // ---------------------Shader Sources---------------------
+        let wgsl_src = include_str!("shaders/forward_gemm.wgsl");
+        let forward_mat_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+            label: Some("forward_shader"),
+            source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
+        });
+
+        // ---------------------Bind Layout---------------------
+        let forward_mat_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("forward_mat_bind_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<MatrixDir>() as u64),
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        
+
+        let forward_mat_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
+            label: Some("bg"),
+            layout: &forward_mat_bind_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: param_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: act_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: forward_mat_dir_binding },
+            ],
+        });
+
+            // ---------------------Update Meta---------------------
+
+        for layer_i in 0..nn_info.get_n_layers() - 1{
+            let mat_dir = MatrixDir::new(&nn_info, layer_i); 
+
+            queue.write_buffer(&forward_mat_dir_buffer, layer_i as u64 * forward_mat_slot, bytemuck::bytes_of(&mat_dir));
+        }
+
+        // ---------------------Pipeline Layout---------------------
+
+        let forward_mat_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
+            label: Some("forward_pipeline_layout"),
+            bind_group_layouts: &[&forward_mat_bind_layout],
+            push_constant_ranges: &[],
+        });
+
+        let forward_mat_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("forward_pipeline"),
+            layout: Some(&forward_mat_pipeline_layout),
+            module: &forward_mat_shader,
+            entry_point: Some("main"),
+            cache: None,
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
         
         // +--------------------------------------------------------+
         // |                                                        |
@@ -771,6 +875,8 @@ impl NNDispatch{
 
 
         let forward_pass_info = NNPassInfo::new(forward_dir_buffer, forward_shader, forward_bind_group, forward_pipeline, forward_slot, vec![64, 4, 0]);
+        let forward_mat_pass_info = NNPassInfo::new(forward_mat_dir_buffer, forward_mat_shader, forward_mat_bind_group, forward_mat_pipeline, forward_mat_slot, vec![64, 1, 0]);
+
         let backward_pass_info = NNPassInfo::new(backward_dir_buffer, backward_shader, backward_bind_group, backward_pipeline, backward_slot, vec![8, 8, 4]);
         
         let gradient_pass_info = NNPassInfo::new(gradient_dir_buffer, gradient_shader, gradient_bind_group, gradient_pipeline, gradient_slot, vec![256, 0, 0]);
@@ -797,6 +903,7 @@ impl NNDispatch{
             metric_buffer,
 
             forward_pass_info,
+            forward_mat_pass_info,
             backward_pass_info,
             gradient_pass_info,
             momentum_pass_info,
@@ -829,6 +936,32 @@ impl NNDispatch{
                 let gy = ceil_div(self.nn_info.get_n_batches(), self.forward_pass_info.workgroup_dim.y);
 
                 pass.dispatch_workgroups(gx as u32, gy as u32, 1);
+            }
+        }
+
+        let forward_commands = encoder.finish();
+        self.queue.submit([forward_commands]);  
+        // self.device.poll(wgpu::PollType::Wait).unwrap();
+    }
+
+    pub fn forward_mat(&self){
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("cpass"),
+                timestamp_writes: None,
+            });
+
+            pass.set_pipeline(&self.forward_mat_pass_info.pipeline);
+
+            for layer_i in 0..(self.nn_info.get_n_layers() - 1){
+                let dyn_off = layer_i as u32 * self.forward_mat_pass_info.dir_slot_size as u32;
+                pass.set_bind_group(0, &self.forward_mat_pass_info.bind_group, &[dyn_off]);
+
+                let gx = ceil_div(self.nn_info.get_dim_n(layer_i + 1), self.forward_mat_pass_info.workgroup_dim.x);
+
+                pass.dispatch_workgroups(gx as u32, self.nn_info.n_batches as u32, 1);
             }
         }
 

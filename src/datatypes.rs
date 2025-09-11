@@ -645,6 +645,34 @@ impl TestMetrics{
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct MatrixDir{
+    act_length: u32,
+    n_start: u32,
+    m_start: u32,
+    w_start: u32,
+
+    n: u32,
+    m: u32,
+    k: u32
+}
+
+impl MatrixDir{
+    pub fn new(nn_info : &NeuralNetworkInfo, dir_i: usize) -> Self{
+        return MatrixDir{
+            act_length: nn_info.activity_info.a_length as u32,
+            n_start: nn_info.activity_info.a_strides[dir_i] as u32,
+            m_start: nn_info.layer_info[dir_i].offset as u32,
+            w_start: nn_info.activity_info.a_strides[dir_i + 1] as u32,
+            n: 1,
+            m: nn_info.layer_dim[dir_i + 1] as u32,
+            k: nn_info.layer_dim[dir_i] as u32,
+            
+        }
+    }
+}
+
 
 pub struct ParamsDir{
     pub layer_dim: Vec<usize>,

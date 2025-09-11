@@ -33,6 +33,10 @@ impl ModelConstructor{
     pub fn set_lr(&mut self, lr: f32){
         self.lr = lr;
     }
+    
+    pub fn set_mr(&mut self, mr: f32){
+        self.mr = mr;
+    }
 
     pub fn set_batch(&mut self, batch: u32){
         self.n_batches = batch;
@@ -104,21 +108,28 @@ impl BasicNNModel{
         for epoch_i in 0..self.model_info.n_epochs{
             self.dispatch.data_reader.reset_counters();
             println!("Epoch {}:", epoch_i);
+            let t0 = Instant::now();
 
             for load_batch_i in 0..self.dispatch.data_reader.n_load_batches{
-
+                
                 // need to load new batch
                 // self.dispatch.data_reader.load_batch_mnist();
                 
                 for sub_batch_i in 0..self.dispatch.data_reader.n_sub_batches{
                     self.dispatch.set_data();
-
-                    self.dispatch.forward();
+                    
+                    
+                    // self.dispatch.forward();
+                    self.dispatch.forward_mat();
                     
                     self.dispatch.apply_error();
                     
+                    // let t0 = Instant::now();
                     self.dispatch.backward();
-
+                    
+                    // self.dispatch.device.poll(wgpu::PollType::Wait).unwrap();
+                    // println!("{:?}", t0.elapsed());
+                    
                     self.dispatch.update_gradients();
                     self.dispatch.update_momentum();
                     
@@ -127,7 +138,9 @@ impl BasicNNModel{
                 
                 self.dispatch.data_reader.increment_load_batch();
             }
+            
             self.dispatch.device.poll(wgpu::PollType::Wait).unwrap();
+            println!("{:?}", t0.elapsed());
         }
     }
 
@@ -145,7 +158,7 @@ impl BasicNNModel{
             for sub_batch_i in 0..self.dispatch.data_reader.n_sub_batches{
                 self.dispatch.set_data();
     
-                self.dispatch.forward();
+                self.dispatch.forward_mat();
     
                 self.dispatch.update_metrics();
     
