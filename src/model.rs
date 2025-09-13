@@ -85,15 +85,17 @@ impl BasicNNModel{
 
     pub fn debug(&mut self){
         // self.dispatch.data_reader.load_batch_testing();
-        self.dispatch.data_reader.load_batch_mnist();
+        // self.dispatch.data_reader.load_batch_mnist();
+        self.dispatch.data_reader.load_batch_debug();
 
         self.dispatch.set_data();
         
-        self.dispatch.forward();
+        self.dispatch.forward_mat();
+        // self.dispatch.forward();
 
-        self.dispatch.apply_error();
+        // self.dispatch.apply_error();
 
-        self.dispatch.backward();
+        // self.dispatch.backward();
 
         self.dispatch.read_back_act_single();
 
@@ -120,15 +122,15 @@ impl BasicNNModel{
                     
                     
                     // self.dispatch.forward();
+                    // let t0 = Instant::now();
                     self.dispatch.forward_mat();
+                    // self.dispatch.device.poll(wgpu::PollType::Wait).unwrap();
+                    // println!("{:?}", t0.elapsed());
                     
                     self.dispatch.apply_error();
                     
-                    // let t0 = Instant::now();
                     self.dispatch.backward();
                     
-                    // self.dispatch.device.poll(wgpu::PollType::Wait).unwrap();
-                    // println!("{:?}", t0.elapsed());
                     
                     self.dispatch.update_gradients();
                     self.dispatch.update_momentum();
@@ -146,7 +148,7 @@ impl BasicNNModel{
 
     // get this to work with testing data 
     pub fn test(&mut self){
-        println!("ajksdhfjad");
+        println!("Testing");
         self.dispatch.data_reader.reset_counters();
         self.dispatch.clear_metrics();
 
@@ -159,6 +161,7 @@ impl BasicNNModel{
                 self.dispatch.set_data();
     
                 self.dispatch.forward_mat();
+                // self.dispatch.forward();
     
                 self.dispatch.update_metrics();
     

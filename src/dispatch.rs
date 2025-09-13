@@ -111,6 +111,8 @@ impl NNDispatch{
 
         // ---------------------Data Reader---------------------
         let mut data_reader = DataReader::new(data_path, (n_batches * data_per_batch) as usize, n_batches as usize);
+        // data_reader.initialise_params_debug();
+        // data_reader.load_batch_debug();
         data_reader.initialise_params_mnist();
         data_reader.load_batch_mnist();
         
@@ -144,6 +146,7 @@ impl NNDispatch{
         let out_buffer = device.create_buffer(&wgpu::BufferDescriptor{
             label: Some("out_buf"),
             size: (p_dir.buffer_size * std::mem::size_of::<f32>()) as u64,
+            // size: (2000 * std::mem::size_of::<f32>()) as u64,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -966,8 +969,9 @@ impl NNDispatch{
                 pass.set_bind_group(0, &self.forward_mat_pass_info.bind_group, &[dyn_off]);
 
                 let gx = ceil_div(self.nn_info.get_dim_n(layer_i + 1), self.forward_mat_pass_info.workgroup_dim.x);
+                let gy = ceil_div(self.nn_info.n_batches, self.forward_mat_pass_info.workgroup_dim.y);
 
-                pass.dispatch_workgroups(gx as u32, self.nn_info.n_batches as u32, 1);
+                pass.dispatch_workgroups(gx as u32, gy as u32, 1);
             }
         }
 

@@ -44,6 +44,14 @@ impl DataValue{
             data_size: info_vec.len(),
         }
     }
+
+    pub fn from_debug() -> DataValue{
+        return DataValue{
+            label: 0.0,
+            info: vec![1.0, 1.0],
+            data_size: 2,
+        }
+    }
 }
 
 pub struct DataReader{
@@ -112,6 +120,13 @@ impl DataReader{
 
         self.n_load_batches = self.dataset_length / self.load_batch_length;
     }
+    
+    pub fn initialise_params_debug(&mut self){
+        self.dataset_length = 10000;
+        self.data_value_size = 2;
+        
+        self.n_load_batches = self.dataset_length / self.load_batch_length;
+    }
 
     pub fn reset_counters(&mut self){
         self.load_batch_i = 0;
@@ -147,6 +162,14 @@ impl DataReader{
             self.loaded_data.push(DataValue::from_mnist(&record));
         }
     }
+
+    pub fn load_batch_debug(&mut self){
+        for i in 0..10000{
+            self.loaded_data.push(DataValue::from_debug());
+        }
+    }
+
+
 
     pub fn load_batch_testing(&mut self){
 

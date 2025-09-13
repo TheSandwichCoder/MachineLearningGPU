@@ -8,8 +8,8 @@ struct MatrixDir{
     w_start: u32,
     w_stride_length: u32,
 
-    add_const: bool,
-    c_start: u32,
+    add_const: u32,
+    c_read_start: u32,
     c_stride_length: u32,
     a_func_type: u32,
 
@@ -37,56 +37,83 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
     
     var k_i : u32 = 0;
 
-    let wx = wg.x;
-    let wy = wg.y;
+    let w_n = wg.x;
+    let w_m = wg.y;
 
-    let tx = lid.x;
-    let ty = lid.y;
+    let t_n = lid.x;
+    let t_m = lid.y;
 
-    let gx = wx * T_N + tx;
-    let gy = wy * T_M + ty;
+    let g_n = w_n * T_N + t_n;
+    let g_m = w_m * T_M + t_m;
 
     var v = 0.0;
 
-    if (gx > mat_dir.n || gy > mat_dir.m){
-        return;
-    }
+    let is_dead : bool = (g_n >= mat_dir.n || g_m >= mat_dir.m);
 
     loop{
         if k_i >= mat_dir.k{
             break;
         }
 
-        let l_x_i = k_i + tx;
-        let l_y_i = k_i + ty;
+        let l_n_i = k_i + t_n;
+        let l_m_i = k_i + t_m;
 
         // loading
-        if (l_y_i < mat_dir.k){
-            // assignment for forward
+        // assignment for forward
 
-            if (l_x_i < mat_dir.n){
-                a_sub[tx][ty] = read_buffer1[mat_dir.n_read_start + mat_dir.n_stride_length * gy + l_x_i];
-            }
-            if (l_y_i < mat_dir.m){
-                b_sub[tx][ty] = read_buffer2[mat_dir.m_read_start + mat_dir.m_stride_length * gx + l_y_i];
-            }
-            
+        if (g_n < mat_dir.n && l_m_i < mat_dir.k){
+            a_sub[t_n][t_m] = read_buffer1[mat_dir.n_read_start + mat_dir.n_stride_length * g_n + l_m_i];            
         }
+        if (g_m < mat_dir.m && l_n_i < mat_dir.k){
+            b_sub[t_n][t_m] = read_buffer2[mat_dir.m_read_start + mat_dir.m_stride_length * g_m + l_n_i];
+        }    
+        
 
         workgroupBarrier();
+        
+        if !is_dead{
+            let limit = min(T_K, mat_dir.k - k_i);
 
-        // get partial derivs
-        let limit = min(T_K, mat_dir.k - k_i);
-
-        for (var i: u32 = 0; i < limit; i++) {
-            v += a_sub[tx][i] * b_sub[i][ty];
+            for (var i: u32 = 0; i < limit; i++) {
+                v += a_sub[t_n][i] * b_sub[i][t_m];
+                // v = a_sub[t_n][i];
+            }
         }
+
 
         workgroupBarrier();
 
         k_i += T_K;
     }
 
-    read_buffer2[mat_dir.w_start + mat_dir.w_stride_length * gy + gx] = v;
-    
+
+    if !is_dead{
+        if (mat_dir.add_const == 1){
+            v += read_buffer1[mat_dir.c_read_start + mat_dir.c_stride_length * g_n];
+        }
+
+        if (mat_dir.a_func_type == 0){
+
+        }
+        else if (mat_dir.a_func_type == 1){
+            v = ReLu(v);
+        }
+
+        read_buffer2[mat_dir.w_start + mat_dir.w_stride_length * g_m + g_n] = v;    
+    }
+}
+
+fn ReLu(x: f32) -> f32{
+    if x > 0{
+        return x;
+    }
+    return 0;
+}
+
+fn dReLu(x: f32) -> f32{
+    if (x > 0){
+        return 1;
+    }
+
+    return 0;
 }

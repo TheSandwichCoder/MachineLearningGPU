@@ -657,7 +657,7 @@ pub struct MatrixDir{
     w_start: u32,
     w_stride_length: u32,
 
-    add_const: bool,
+    add_const: u32,
     c_start: u32,
     c_stride_length: u32,
     a_func_type: u32,
@@ -675,17 +675,21 @@ impl MatrixDir{
     w: activity
     */
     pub fn new_forward(nn_info: &NeuralNetworkInfo, dir_i: usize) -> Self{
+        println!("{} {}", dir_i, nn_info.layer_dim[dir_i]);
         return MatrixDir{
             n_read_start: nn_info.layer_info[dir_i].offset as u32,
             m_read_start: nn_info.activity_info.a_strides[dir_i] as u32,
 
-            n_stride_length: nn_info.p_length as u32,
+            n_stride_length: (nn_info.layer_dim[dir_i] + 1) as u32,
             m_stride_length: nn_info.activity_info.a_length as u32,
 
             w_start: nn_info.activity_info.a_strides[dir_i + 1] as u32,
             w_stride_length: nn_info.activity_info.a_length as u32,
 
-            add_const: true,
+            add_const: 1,
+            c_start: (nn_info.layer_info[dir_i].offset + nn_info.layer_dim[dir_i])  as u32,
+            c_stride_length: (nn_info.layer_dim[dir_i] + 1) as u32,
+            a_func_type: 1,
             
 
             n: nn_info.layer_dim[dir_i + 1] as u32,
@@ -733,6 +737,14 @@ impl ParamsDir{
     }
 
     pub fn create_buffer(&self) -> Vec<f32>{
+        // let mut out : Vec<f32> = Vec::new();
+
+        // for i in 0..self.buffer_size{
+        //     out.push(i as f32);
+        // }
+
+        // return out;
+
         let mut rng = rand::thread_rng();
 
         let random_floats: Vec<f32> = (0..self.buffer_size)

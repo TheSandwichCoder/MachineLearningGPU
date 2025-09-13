@@ -28,6 +28,10 @@ fn main() {
     // pollster::block_on(run());
     let mut constructor = ModelConstructor::default();
 
+    // constructor.set_nn_dim(&vec![2, 17, 2]);
+    // constructor.set_lr(1.0);
+    // constructor.load_all_data(10000);
+
     constructor.set_nn_dim(&vec![784, 128, 64, 10]);
     constructor.set_datapath(String::from("./datasets/mnist_numbers.csv"));
     constructor.set_epochs(10);
