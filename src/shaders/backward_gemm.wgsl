@@ -49,6 +49,8 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
     let gx = wx * T_N + tx;
     let gy = wy * T_M + ty;
 
+    var v = 0.0;
+
     loop{
         if k_i >= mat_dir.k{
             break;
@@ -56,30 +58,24 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
 
         // loading
         if (ty + k_i < mat_dir.k){
-            for (var i: u32 = 0; i < T_K; i++) {
-                a_sub[tx][i] = ;
-            }
-
-            for (var i: u32 = 0; i < T_K; i++) {
-                b_sub[i][ty] = ;
-            }
-        }
-
-        if (gx < mat_dir.n){
-            a_sub[ty][tx] = activities[];
-        }
-
-        if (gy < mat_dir.m){
-            b_sub[ty][tx] = params[];
+            a_sub[tx][ty] = ;
+            
+            b_sub[tx][ty] = ;
         }
 
         workgroupBarrier();
 
-        // 
+        // get partial derivs
+        let limit = min(T_K, mat_dir.k - k_i);
 
-        
+        for (var i: u32 = 0; i < limit; i++) {
+            v += a_sub[tx][i] * b_sub[i][ty];
+        }
+
+        workgroupBarrier()        
 
         k_i += T_K;
     }
+
 
 }

@@ -648,10 +648,19 @@ impl TestMetrics{
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct MatrixDir{
-    act_length: u32,
-    n_start: u32,
-    m_start: u32,
+    n_read_start: u32,
+    m_read_start: u32,
+
+    n_stride_length: u32,
+    m_stride_length: u32,
+    
     w_start: u32,
+    w_stride_length: u32,
+
+    add_const: bool,
+    c_start: u32,
+    c_stride_length: u32,
+    a_func_type: u32,
 
     n: u32,
     m: u32,
@@ -659,18 +668,45 @@ pub struct MatrixDir{
 }
 
 impl MatrixDir{
-    pub fn new(nn_info : &NeuralNetworkInfo, dir_i: usize) -> Self{
+    /*
+    new forward: 
+    n: params/weights
+    m: activity
+    w: activity
+    */
+    pub fn new_forward(nn_info: &NeuralNetworkInfo, dir_i: usize) -> Self{
         return MatrixDir{
-            act_length: nn_info.activity_info.a_length as u32,
-            n_start: nn_info.activity_info.a_strides[dir_i] as u32,
-            m_start: nn_info.layer_info[dir_i].offset as u32,
+            n_read_start: nn_info.layer_info[dir_i].offset as u32,
+            m_read_start: nn_info.activity_info.a_strides[dir_i] as u32,
+
+            n_stride_length: nn_info.p_length as u32,
+            m_stride_length: nn_info.activity_info.a_length as u32,
+
             w_start: nn_info.activity_info.a_strides[dir_i + 1] as u32,
-            n: 1,
-            m: nn_info.layer_dim[dir_i + 1] as u32,
-            k: nn_info.layer_dim[dir_i] as u32,
+            w_stride_length: nn_info.activity_info.a_length as u32,
+
+            add_const: true,
             
+
+            n: nn_info.layer_dim[dir_i + 1] as u32,
+            m: nn_info.n_batches as u32,
+            k: nn_info.layer_dim[dir_i] as u32,
         }
     }
+
+    
+    // pub fn new(nn_info : &NeuralNetworkInfo, dir_i: usize) -> Self{
+    //     return MatrixDir{
+    //         act_length: nn_info.activity_info.a_length as u32,
+    //         n_start: nn_info.activity_info.a_strides[dir_i] as u32,
+    //         m_start: nn_info.layer_info[dir_i].offset as u32,
+    //         w_start: nn_info.activity_info.a_strides[dir_i + 1] as u32,
+    //         n: 1,
+    //         m: nn_info.layer_dim[dir_i + 1] as u32,
+    //         k: nn_info.layer_dim[dir_i] as u32,
+            
+    //     }
+    // }
 }
 
 

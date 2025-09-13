@@ -267,37 +267,12 @@ impl NNDispatch{
 
         // +--------------------------------------------------------+
         // |                                                        |
-        // |                   Forward Mat Pass                     |
+        // |                     GEMM Configs                       |
         // |                                                        |
         // +--------------------------------------------------------+
 
-        let forward_mat_slot   = ((std::mem::size_of::<MatrixDir>() as u64 + align - 1) / align) * align;
-        let forward_mat_dir_buffer_size = forward_mat_slot * (nn_info.get_n_layers() - 1) as u64;
-
-        let forward_mat_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
-            label: Some("nn_dir_buf"),
-            size: forward_mat_dir_buffer_size,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        // ---------------------Special Binding---------------------
-        let forward_mat_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-            buffer: &forward_mat_dir_buffer,
-            offset: 0,
-            size: Some(wgpu::BufferSize::new(forward_mat_slot).unwrap()),
-        });
-
-
-        // ---------------------Shader Sources---------------------
-        let wgsl_src = include_str!("shaders/forward_gemm.wgsl");
-        let forward_mat_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
-            label: Some("forward_shader"),
-            source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
-        });
-
         // ---------------------Bind Layout---------------------
-        let forward_mat_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let gemm_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("forward_mat_bind_layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
@@ -333,11 +308,41 @@ impl NNDispatch{
             ],
         });
 
-        
+        let gemm_mat_slot   = ((std::mem::size_of::<MatrixDir>() as u64 + align - 1) / align) * align;
+
+        // +--------------------------------------------------------+
+        // |                                                        |
+        // |                   Forward Mat Pass                     |
+        // |                                                        |
+        // +--------------------------------------------------------+
+
+        let forward_mat_dir_buffer_size = gemm_mat_slot * (nn_info.get_n_layers() - 1) as u64;
+
+        let forward_mat_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
+            label: Some("nn_dir_buf"),
+            size: forward_mat_dir_buffer_size,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // ---------------------Special Binding---------------------
+        let forward_mat_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &forward_mat_dir_buffer,
+            offset: 0,
+            size: Some(wgpu::BufferSize::new(gemm_mat_slot).unwrap()),
+        });
+
+
+        // ---------------------Shader Sources---------------------
+        let wgsl_src = include_str!("shaders/gemm.wgsl");
+        let forward_mat_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+            label: Some("forward_gemm_shader"),
+            source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
+        });
 
         let forward_mat_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
             label: Some("bg"),
-            layout: &forward_mat_bind_layout,
+            layout: &gemm_bind_layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: param_buffer.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: act_buffer.as_entire_binding() },
@@ -348,21 +353,21 @@ impl NNDispatch{
             // ---------------------Update Meta---------------------
 
         for layer_i in 0..nn_info.get_n_layers() - 1{
-            let mat_dir = MatrixDir::new(&nn_info, layer_i); 
+            let mat_dir = MatrixDir::new_forward(&nn_info, layer_i); 
 
-            queue.write_buffer(&forward_mat_dir_buffer, layer_i as u64 * forward_mat_slot, bytemuck::bytes_of(&mat_dir));
+            queue.write_buffer(&forward_mat_dir_buffer, layer_i as u64 * gemm_mat_slot, bytemuck::bytes_of(&mat_dir));
         }
 
         // ---------------------Pipeline Layout---------------------
 
         let forward_mat_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
-            label: Some("forward_pipeline_layout"),
-            bind_group_layouts: &[&forward_mat_bind_layout],
+            label: Some("forward_gemm_pipeline_layout"),
+            bind_group_layouts: &[&gemm_bind_layout],
             push_constant_ranges: &[],
         });
 
         let forward_mat_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("forward_pipeline"),
+            label: Some("forward_gemm_pipeline"),
             layout: Some(&forward_mat_pipeline_layout),
             module: &forward_mat_shader,
             entry_point: Some("main"),
@@ -875,7 +880,8 @@ impl NNDispatch{
 
 
         let forward_pass_info = NNPassInfo::new(forward_dir_buffer, forward_shader, forward_bind_group, forward_pipeline, forward_slot, vec![64, 4, 0]);
-        let forward_mat_pass_info = NNPassInfo::new(forward_mat_dir_buffer, forward_mat_shader, forward_mat_bind_group, forward_mat_pipeline, forward_mat_slot, vec![64, 1, 0]);
+
+        let forward_mat_pass_info = NNPassInfo::new(forward_mat_dir_buffer, forward_mat_shader, forward_mat_bind_group, forward_mat_pipeline, gemm_mat_slot, vec![16, 16, 0]);
 
         let backward_pass_info = NNPassInfo::new(backward_dir_buffer, backward_shader, backward_bind_group, backward_pipeline, backward_slot, vec![8, 8, 4]);
         
