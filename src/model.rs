@@ -93,9 +93,9 @@ impl BasicNNModel{
         self.dispatch.forward_mat();
         // self.dispatch.forward();
 
-        // self.dispatch.apply_error();
+        self.dispatch.apply_error();
 
-        // self.dispatch.backward();
+        self.dispatch.backward_mat();
 
         self.dispatch.read_back_act_single();
 

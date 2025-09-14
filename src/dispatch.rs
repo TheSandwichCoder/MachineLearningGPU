@@ -67,6 +67,10 @@ pub struct NNDispatch{
     forward_mat_pass_info: NNPassInfo,
 
     backward_pass_info: NNPassInfo,
+
+    backward_deriv_mat_pass_info: NNPassInfo,
+    backward_gradient_mat_pass_info: NNPassInfo,
+
     gradient_pass_info: NNPassInfo,
     momentum_pass_info: NNPassInfo,
     error_pass_info: NNPassInfo,
@@ -111,10 +115,10 @@ impl NNDispatch{
 
         // ---------------------Data Reader---------------------
         let mut data_reader = DataReader::new(data_path, (n_batches * data_per_batch) as usize, n_batches as usize);
-        // data_reader.initialise_params_debug();
-        // data_reader.load_batch_debug();
-        data_reader.initialise_params_mnist();
-        data_reader.load_batch_mnist();
+        data_reader.initialise_params_debug();
+        data_reader.load_batch_debug();
+        // data_reader.initialise_params_mnist();
+        // data_reader.load_batch_mnist();
         
         // ---------------------Buffer Stuff---------------------
         let param_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
@@ -145,8 +149,8 @@ impl NNDispatch{
 
         let out_buffer = device.create_buffer(&wgpu::BufferDescriptor{
             label: Some("out_buf"),
-            size: (p_dir.buffer_size * std::mem::size_of::<f32>()) as u64,
-            // size: (2000 * std::mem::size_of::<f32>()) as u64,
+            // size: (p_dir.buffer_size * std::mem::size_of::<f32>()) as u64,
+            size: (2000 * std::mem::size_of::<f32>()) as u64,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -274,6 +278,7 @@ impl NNDispatch{
         // |                                                        |
         // +--------------------------------------------------------+
 
+
         // ---------------------Bind Layout---------------------
         let gemm_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("forward_mat_bind_layout"),
@@ -337,7 +342,7 @@ impl NNDispatch{
 
 
         // ---------------------Shader Sources---------------------
-        let wgsl_src = include_str!("shaders/gemm.wgsl");
+        let wgsl_src = include_str!("shaders/gemm_i_io.wgsl");
         let forward_mat_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
             label: Some("forward_gemm_shader"),
             source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
@@ -480,6 +485,137 @@ impl NNDispatch{
             cache: None,
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
+
+        // +--------------------------------------------------------+
+        // |                                                        |
+        // |                 Backward Deriv Pass                    |
+        // |                                                        |
+        // +--------------------------------------------------------+
+        
+        let backward_deriv_mat_dir_buffer_size = gemm_mat_slot * (nn_info.get_n_layers() - 1) as u64;
+
+        let backward_deriv_mat_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
+            label: Some("nn_dir_buf"),
+            size: backward_deriv_mat_dir_buffer_size,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // ---------------------Special Binding---------------------
+        let backward_deriv_mat_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &backward_deriv_mat_dir_buffer,
+            offset: 0,
+            size: Some(wgpu::BufferSize::new(gemm_mat_slot).unwrap()),
+        });
+
+
+        // ---------------------Shader Sources---------------------
+        let wgsl_src = include_str!("shaders/gemm_i_io.wgsl");
+        let backward_deriv_mat_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+            label: Some("backward_deriv_gemm_shader"),
+            source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
+        });
+
+        let backward_deriv_mat_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
+            label: Some("bg"),
+            layout: &gemm_bind_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: param_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: act_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: backward_deriv_mat_dir_binding },
+            ],
+        });
+
+            // ---------------------Update Meta---------------------
+
+        for layer_i in 0..nn_info.get_n_layers() - 1{
+            let mat_dir = MatrixDir::new_backward_deriv(&nn_info, layer_i); 
+
+            queue.write_buffer(&backward_deriv_mat_dir_buffer, layer_i as u64 * gemm_mat_slot, bytemuck::bytes_of(&mat_dir));
+        }
+
+        // ---------------------Pipeline Layout---------------------
+
+        let backward_deriv_mat_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
+            label: Some("backward_deriv_gemm_pipeline_layout"),
+            bind_group_layouts: &[&gemm_bind_layout],
+            push_constant_ranges: &[],
+        });
+
+        let backward_deriv_mat_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("backward_deriv_gemm_pipeline"),
+            layout: Some(&backward_deriv_mat_pipeline_layout),
+            module: &backward_deriv_mat_shader,
+            entry_point: Some("main"),
+            cache: None,
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
+        // +--------------------------------------------------------+
+        // |                                                        |
+        // |               Backward Gradient Pass                   |
+        // |                                                        |
+        // +--------------------------------------------------------+
+        // 
+        let backward_gradient_mat_dir_buffer_size = gemm_mat_slot * (nn_info.get_n_layers() - 1) as u64;
+
+        let backward_gradient_mat_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
+            label: Some("nn_dir_buf"),
+            size: backward_gradient_mat_dir_buffer_size,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // ---------------------Special Binding---------------------
+        let backward_gradient_mat_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &backward_gradient_mat_dir_buffer,
+            offset: 0,
+            size: Some(wgpu::BufferSize::new(gemm_mat_slot).unwrap()),
+        });
+
+
+        // ---------------------Shader Sources---------------------
+        let wgsl_src = include_str!("shaders/gemm_i_o.wgsl");
+        let backward_gradient_mat_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+            label: Some("backward_gradient_mat_gemm_shader"),
+            source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
+        });
+
+        let backward_gradient_mat_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
+            label: Some("bg"),
+            layout: &gemm_bind_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: param_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: gradient_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: backward_gradient_mat_dir_binding },
+            ],
+        });
+
+            // ---------------------Update Meta---------------------
+
+        for layer_i in 0..nn_info.get_n_layers() - 1{
+            let mat_dir = MatrixDir::new_backward_gradients(&nn_info, layer_i); 
+
+            queue.write_buffer(&backward_gradient_mat_dir_buffer, layer_i as u64 * gemm_mat_slot, bytemuck::bytes_of(&mat_dir));
+        }
+
+        // ---------------------Pipeline Layout---------------------
+
+        let backward_gradient_mat_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
+            label: Some("backward_gradient_gemm_pipeline_layout"),
+            bind_group_layouts: &[&gemm_bind_layout],
+            push_constant_ranges: &[],
+        });
+
+        let backward_gradient_mat_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("backward_gradient_gemm_pipeline"),
+            layout: Some(&backward_gradient_mat_pipeline_layout),
+            module: &backward_gradient_mat_shader,
+            entry_point: Some("main"),
+            cache: None,
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
 
         // +--------------------------------------------------------+
         // |                                                        |
@@ -880,14 +1016,17 @@ impl NNDispatch{
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
         
-
+        let gem_wg = vec![16, 16, 0];
 
         let forward_pass_info = NNPassInfo::new(forward_dir_buffer, forward_shader, forward_bind_group, forward_pipeline, forward_slot, vec![64, 4, 0]);
 
-        let forward_mat_pass_info = NNPassInfo::new(forward_mat_dir_buffer, forward_mat_shader, forward_mat_bind_group, forward_mat_pipeline, gemm_mat_slot, vec![16, 16, 0]);
+        let forward_mat_pass_info = NNPassInfo::new(forward_mat_dir_buffer, forward_mat_shader, forward_mat_bind_group, forward_mat_pipeline, gemm_mat_slot, gem_wg.clone());
 
         let backward_pass_info = NNPassInfo::new(backward_dir_buffer, backward_shader, backward_bind_group, backward_pipeline, backward_slot, vec![8, 8, 4]);
-        
+
+        let backward_deriv_mat_pass_info = NNPassInfo::new(backward_deriv_mat_dir_buffer, backward_deriv_mat_shader, backward_deriv_mat_bind_group, backward_deriv_mat_pipeline, gemm_mat_slot, gem_wg.clone());
+        let backward_gradient_mat_pass_info = NNPassInfo::new(backward_gradient_mat_dir_buffer, backward_gradient_mat_shader, backward_gradient_mat_bind_group, backward_gradient_mat_pipeline, gemm_mat_slot, gem_wg.clone());
+
         let gradient_pass_info = NNPassInfo::new(gradient_dir_buffer, gradient_shader, gradient_bind_group, gradient_pipeline, gradient_slot, vec![256, 0, 0]);
         let momentum_pass_info = NNPassInfo::new(momentum_dir_buffer, momentum_shader, momentum_bind_group, momentum_pipeline, momentum_slot, vec![256, 0, 0]);
 
@@ -914,6 +1053,8 @@ impl NNDispatch{
             forward_pass_info,
             forward_mat_pass_info,
             backward_pass_info,
+            backward_deriv_mat_pass_info,
+            backward_gradient_mat_pass_info,
             gradient_pass_info,
             momentum_pass_info,
             error_pass_info,
@@ -978,6 +1119,37 @@ impl NNDispatch{
         let forward_commands = encoder.finish();
         self.queue.submit([forward_commands]);  
         // self.device.poll(wgpu::PollType::Wait).unwrap();
+    }
+
+    pub fn backward_mat(&self){
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("cpass"),
+                timestamp_writes: None,
+            });
+
+            pass.set_pipeline(&self.backward_deriv_mat_pass_info.pipeline);
+
+            for layer_i in (0..(self.nn_info.get_n_layers() - 1)).rev(){
+
+                if layer_i == self.nn_info.get_n_layers() - 2{
+                    continue;
+                }
+                let dyn_off = layer_i as u32 * self.backward_deriv_mat_pass_info.dir_slot_size as u32;
+                pass.set_bind_group(0, &self.backward_deriv_mat_pass_info.bind_group, &[dyn_off]);
+                // println!("{} {} {}", self.forward_pass_info.workgroup_dim.x, self.forward_pass_info.workgroup_dim.y,self.forward_pass_info.workgroup_dim.z );
+
+                let gx = ceil_div(self.nn_info.layer_dim[layer_i + 1], self.backward_deriv_mat_pass_info.workgroup_dim.x);
+                let gy = ceil_div(self.nn_info.n_batches, self.backward_deriv_mat_pass_info.workgroup_dim.y);
+
+                pass.dispatch_workgroups(gx as u32, gy as u32, 1);
+            }
+        }
+
+        let backward_commands = encoder.finish();
+        self.queue.submit([backward_commands]); 
     }
 
     pub fn backward(&self){
