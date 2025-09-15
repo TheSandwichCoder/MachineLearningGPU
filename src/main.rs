@@ -28,7 +28,7 @@ fn main() {
     // pollster::block_on(run());
     let mut constructor = ModelConstructor::default();
 
-    // constructor.set_nn_dim(&vec![2, 3, 2]);
+    // constructor.set_nn_dim(&vec![2, 17, 2]);
     // constructor.set_lr(1.0);
     // constructor.load_all_data(10000);
 

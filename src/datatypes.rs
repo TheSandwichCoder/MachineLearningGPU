@@ -175,23 +175,20 @@ impl TensorInfo{
 // 1. activity ping pong buffer 1 (array)
 // 2. activity ping pong buffer 2 (array)
 // 3. pre-activition storage (array)
-// 4. activity layer gradients (tensor)
-// 5. deriv ping pong buffer 1 (array)
-// 6. deriv ping pong buffer 2 (array)
+// 4. deriv ping pong buffer 1 (array)
+// 5. deriv ping pong buffer 2 (array)
 
 #[derive(Clone)]
 pub struct ActivityInfo{
     pub offset: usize,
     pub a_dim: Vec<usize>,
     pub a_strides: Vec<usize>,
-    pub a_gradients: Vec<TensorInfo>,
 
     pub a_swap_buffer_size: usize,
     pub a_deriv_buffer_size: usize,
     pub a_length: usize,
     
     pub s_start: usize,
-    pub g_start: usize,
     pub d_start: usize,
 }
 
@@ -201,14 +198,12 @@ impl ActivityInfo{
             offset: 0,
             a_dim: Vec::new(),
             a_strides: Vec::new(),
-            a_gradients: Vec::new(),
 
             a_swap_buffer_size: 0,
             a_deriv_buffer_size: 0,
             a_length: 0,
 
             s_start: 0, // activition storage
-            g_start: 0, // gradients
             d_start: 0, // derivative ping pong
         }
     }
@@ -225,38 +220,20 @@ impl ActivityInfo{
         let a_strides = get_activity_strides(a_dim);
         t_length += get_activity_length(a_dim);
 
-        let deriv_buffer_size = get_activity_deriv_buffer_size(a_dim);
-        let mut gradient_info = Vec::new();
-
-        let g_start = t_length;
-
-        for layer_i in 0..(a_dim.len() - 1){
-
-            let mut tensor_info_i = TensorInfo::new(&vec![1, a_dim[layer_i + 1], a_dim[layer_i] + 1]);
-
-            tensor_info_i.offset = t_length;
-
-            t_length += tensor_info_i.tens_length;
-
-            gradient_info.push(tensor_info_i);
-        }
-
         let d_start = t_length;
 
-        t_length += deriv_buffer_size * 2;
+        t_length += largest_layer * 2;
 
         return ActivityInfo{
             offset: 0,
             a_dim: a_dim.clone(),
             a_strides: a_strides.clone(),
-            a_gradients: gradient_info.clone(),
 
             a_swap_buffer_size: largest_layer,
-            a_deriv_buffer_size: deriv_buffer_size,
+            a_deriv_buffer_size: largest_layer,
             a_length: t_length,
 
             s_start: s_start,
-            g_start: g_start,
             d_start: d_start,
         }
     }
@@ -307,10 +284,6 @@ impl NeuralNetworkInfo{
         
         println!("\nACTIVITY:");
         println!("Activity Strides: {:?}", self.activity_info.a_strides);
-        println!("Activity Gradients:");
-        for g in &self.activity_info.a_gradients{
-            println!(" - gradient dim: {:?}", g.tens_dim);
-        }
         println!("Ping Pong Buffer length: {} floats", self.activity_info.a_deriv_buffer_size);
         println!("Total Buffer Length: {} floats", self.activity_info.a_length);
 
@@ -447,150 +420,10 @@ impl NeuralNetworkInfo{
 
 }
 
-
-
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-pub struct ForwardDir {
-    pub read_layer_start: u32,
-    pub read_layer_length: u32,
-
-    pub param_layer_start: u32,
-    pub param_layer_length:u32,
-
-    pub write_layer_start: u32,
-    pub write_layer_length: u32,
-
-    pub n_batches: u32,
-    pub batch_act_size: u32,
-
-    pub activation_type: u32,
-}
-
-impl ForwardDir{
-    pub fn new(
-        nn_info: &NeuralNetworkInfo,
-        dir_i: usize,
-    ) -> Self{
-        let activation_type: u32;
-
-        if nn_info.n_layers == dir_i + 2{
-            activation_type = 0;
-        }
-        else{
-            activation_type = 1;
-        }
-
-        ForwardDir{
-            read_layer_start: nn_info.activity_info.s_start as u32 + nn_info.activity_info.a_strides[dir_i] as u32,
-            read_layer_length: nn_info.activity_info.a_dim[dir_i] as u32,
-            
-            param_layer_start: nn_info.layer_info[dir_i].offset as u32,
-            param_layer_length: nn_info.activity_info.a_dim[dir_i] as u32 + 1,
-
-            write_layer_start: nn_info.activity_info.s_start as u32 + nn_info.activity_info.a_strides[dir_i + 1] as u32,
-            write_layer_length: nn_info.activity_info.a_dim[dir_i + 1] as u32,
-
-            n_batches: nn_info.n_batches as u32,
-            batch_act_size: nn_info.activity_info.a_length as u32,
-
-            activation_type: activation_type,
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-pub struct BackwardDir {
-    prev_layer_start: u32,
-    prev_layer_length: u32,
-
-    param_layer_start: u32,
-    param_layer_length:u32,
-
-    curr_layer_start: u32,
-    curr_layer_length: u32,
-
-    next_layer_start: u32,
-    next_layer_length: u32,
-
-    ping_start: u32,
-    pong_start: u32,
-
-    gradients_start: u32,
-    gradient_length: u32,
-
-    n_batches: u32, 
-    batch_act_size: u32,
-
-    activation_type: u32,
-}
-
-impl BackwardDir{
-    pub fn new(
-        nn_info: &NeuralNetworkInfo,
-        dir_i: usize,
-    ) -> Self{
-        let next_layer_start: u32;
-        let next_layer_length: u32;
-
-        if dir_i == nn_info.n_layers - 2{
-            next_layer_start = 0;
-            next_layer_length = 1;
-        }
-
-        else{
-            next_layer_start = nn_info.activity_info.a_strides[dir_i + 2] as u32;
-            next_layer_length = nn_info.activity_info.a_dim[dir_i + 2] as u32;
-        }
-
-        let ping_switch = dir_i % 2;
-        let pong_switch = (dir_i + 1) % 2;
-
-        let ping_pong_default = nn_info.activity_info.d_start;
-
-        let activation_type: u32;
-
-        if nn_info.n_layers - 2 == dir_i{
-            activation_type = 0;
-        }
-        else{
-            activation_type = 1;
-        }
-
-
-        BackwardDir{
-            prev_layer_start: nn_info.activity_info.s_start as u32 + nn_info.activity_info.a_strides[dir_i] as u32,
-            prev_layer_length: nn_info.activity_info.a_dim[dir_i] as u32,
-
-            param_layer_start: nn_info.layer_info[dir_i].offset as u32,
-            param_layer_length: nn_info.activity_info.a_dim[dir_i] as u32 + 1,
-
-            curr_layer_start: nn_info.activity_info.s_start as u32 + nn_info.activity_info.a_strides[dir_i + 1] as u32,
-            curr_layer_length: nn_info.activity_info.a_dim[dir_i + 1] as u32,
-
-            next_layer_start: next_layer_start,
-            next_layer_length: next_layer_length,
-
-            ping_start : (ping_pong_default + nn_info.activity_info.a_deriv_buffer_size * ping_switch) as u32,
-            pong_start : (ping_pong_default + nn_info.activity_info.a_deriv_buffer_size * pong_switch) as u32,
-
-            gradients_start: nn_info.activity_info.g_start as u32 + nn_info.layer_info[dir_i].offset as u32,
-            gradient_length: nn_info.activity_info.a_dim[dir_i] as u32 + 1,
-
-            n_batches: nn_info.n_batches as u32,
-            batch_act_size: nn_info.activity_info.a_length as u32,
-
-            activation_type: activation_type,
-        }
-    }
-}
-
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-pub struct GradientDir{
-    pub batch_start_i: u32,
+pub struct FlatApplyDir{
+    batch_start_i: u32,
     batch_i: u32,
     gradient_start_i: u32,
     batch_contribution: f32,
@@ -599,12 +432,12 @@ pub struct GradientDir{
     mr: f32,
 }
 
-impl GradientDir{
+impl FlatApplyDir{
     pub fn new(nn_info : &NeuralNetworkInfo, dir_i: usize) -> Self{
-        return GradientDir{
+        return FlatApplyDir{
             batch_start_i: nn_info.activity_info.a_length as u32 * dir_i as u32,
             batch_i: dir_i as u32,
-            gradient_start_i: nn_info.activity_info.g_start as u32,
+            gradient_start_i: 0,
             batch_contribution: 1.0 / nn_info.n_batches as f32,
             n_params: nn_info.p_length as u32,
             lr: nn_info.lr,

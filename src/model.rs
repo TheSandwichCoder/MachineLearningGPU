@@ -18,7 +18,7 @@ impl ModelConstructor{
         return ModelConstructor{
             nn_dim: Vec::new(),
             n_batches: 16,
-            n_data_per_batch: 2624,
+            n_data_per_batch: 100,
             n_epochs: 1,
             data_path: String::from(""),
             lr: 0.1,
@@ -91,12 +91,9 @@ impl BasicNNModel{
         self.dispatch.set_data();
         
         self.dispatch.forward_mat();
-        // self.dispatch.forward();
 
         self.dispatch.apply_error();
 
-        // self.dispatch.backward();
-        // self.dispatch.update_gradients();
         self.dispatch.backward_mat();
 
         self.dispatch.read_back_act_single();
@@ -124,21 +121,13 @@ impl BasicNNModel{
                 
                 for sub_batch_i in 0..self.dispatch.data_reader.n_sub_batches{
                     self.dispatch.set_data();
-                    
-                    
-                    // self.dispatch.forward();
-                    // let t0 = Instant::now();
+                                        
                     self.dispatch.forward_mat();
-                    // self.dispatch.device.poll(wgpu::PollType::Wait).unwrap();
-                    // println!("{:?}", t0.elapsed());
                     
                     self.dispatch.apply_error();
                     
-                    // self.dispatch.backward();
                     self.dispatch.backward_mat();
                     
-                    
-                    // self.dispatch.update_gradients();
                     self.dispatch.update_momentum();
                     
                     self.dispatch.data_reader.increment_sub_batch();
@@ -157,6 +146,7 @@ impl BasicNNModel{
         println!("Testing");
         self.dispatch.data_reader.reset_counters();
         self.dispatch.clear_metrics();
+        let t0 = Instant::now();
 
         for load_batch_i in 0..self.dispatch.data_reader.n_load_batches{
             // need to load new batch
@@ -167,7 +157,6 @@ impl BasicNNModel{
                 self.dispatch.set_data();
     
                 self.dispatch.forward_mat();
-                // self.dispatch.forward();
     
                 self.dispatch.update_metrics();
     
@@ -177,6 +166,8 @@ impl BasicNNModel{
             self.dispatch.data_reader.increment_load_batch();
 
         }
+        self.dispatch.device.poll(wgpu::PollType::Wait).unwrap();
+        println!("{:?}", t0.elapsed());
 
         self.dispatch.read_back_metrics();
 

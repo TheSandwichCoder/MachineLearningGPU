@@ -37,10 +37,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let outputs = softmax(output_start_i);
 
-    // for (var output_i:u32 = 0; output_i < nn_dir.n_outputs; output_i += 1){
-    //     activities[act_start + nn_dir.ping_start + output_i] = activities[output_start_i + output_i];
-    // }
-
     for (var output_i:u32 = 0; output_i < nn_dir.n_outputs; output_i += 1){
         if (output_i == label){
             activities[act_start + nn_dir.ping_start + output_i] = 1.0 - outputs[output_i];

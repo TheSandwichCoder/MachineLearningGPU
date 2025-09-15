@@ -63,15 +63,11 @@ pub struct NNDispatch{
     metric_buffer: wgpu::Buffer, // gets accuracy and metrics
 
 
-    forward_pass_info: NNPassInfo,
     forward_mat_pass_info: NNPassInfo,
-
-    backward_pass_info: NNPassInfo,
 
     backward_deriv_mat_pass_info: NNPassInfo,
     backward_gradient_mat_pass_info: NNPassInfo,
 
-    gradient_pass_info: NNPassInfo,
     momentum_pass_info: NNPassInfo,
     error_pass_info: NNPassInfo,
     test_pass_info: NNPassInfo,
@@ -166,111 +162,6 @@ impl NNDispatch{
             contents: bytemuck::bytes_of(&test_metrics),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
-        
-        // +--------------------------------------------------------+
-        // |                                                        |
-        // |                    Forward Pass                        |
-        // |                                                        |
-        // +--------------------------------------------------------+
-
-        let forward_slot   = ((std::mem::size_of::<ForwardDir>() as u64 + align - 1) / align) * align;
-        let forward_dir_buffer_size = forward_slot * (nn_info.get_n_layers() - 1) as u64;
-
-        let forward_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
-            label: Some("nn_dir_buf"),
-            size: forward_dir_buffer_size,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        // ---------------------Special Binding---------------------
-        let forward_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-            buffer: &forward_dir_buffer,
-            offset: 0,
-            size: Some(wgpu::BufferSize::new(forward_slot).unwrap()),
-        });
-
-
-        // ---------------------Shader Sources---------------------
-        let wgsl_src = include_str!("shaders/forward_nn.wgsl");
-        let forward_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
-            label: Some("forward_shader"),
-            source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
-        });
-
-        // ---------------------Bind Layout---------------------
-        let forward_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("forward_bind_layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: true,
-                        min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<ForwardDir>() as u64),
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        
-
-        let forward_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
-            label: Some("bg"),
-            layout: &forward_bind_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: param_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: act_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: forward_dir_binding },
-            ],
-        });
-
-            // ---------------------Update Meta---------------------
-
-        for layer_i in 0..nn_info.get_n_layers() - 1{
-            let forward_dir = ForwardDir::new(&nn_info, layer_i); 
-
-            queue.write_buffer(&forward_dir_buffer, layer_i as u64 * forward_slot, bytemuck::bytes_of(&forward_dir));
-        }
-
-        // ---------------------Pipeline Layout---------------------
-
-        let forward_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
-            label: Some("forward_pipeline_layout"),
-            bind_group_layouts: &[&forward_bind_layout],
-            push_constant_ranges: &[],
-        });
-
-        let forward_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("forward_pipeline"),
-            layout: Some(&forward_pipeline_layout),
-            module: &forward_shader,
-            entry_point: Some("main"),
-            cache: None,
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-        });
 
         // +--------------------------------------------------------+
         // |                                                        |
@@ -342,7 +233,7 @@ impl NNDispatch{
 
 
         // ---------------------Shader Sources---------------------
-        let wgsl_src = include_str!("shaders/gemm_i_io.wgsl");
+        let wgsl_src = include_str!("shaders/gemm_op/gemm_i_io.wgsl");
         let forward_mat_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
             label: Some("forward_gemm_shader"),
             source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
@@ -382,109 +273,6 @@ impl NNDispatch{
             cache: None,
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
-        
-        // +--------------------------------------------------------+
-        // |                                                        |
-        // |                    Backward Pass                       |
-        // |                                                        |
-        // +--------------------------------------------------------+
-        
-        let backward_slot   = ((std::mem::size_of::<BackwardDir>() as u64 + align - 1) / align) * align;
-        let backward_dir_buffer_size = backward_slot * (nn_info.get_n_layers() - 1) as u64;
-
-        let backward_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
-            label: Some("backward_dir_buf"),
-            size: backward_dir_buffer_size,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        // ---------------------Special Binding---------------------
-        let backward_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-            buffer: &backward_dir_buffer,
-            offset: 0,
-            size: Some(wgpu::BufferSize::new(backward_slot).unwrap()),
-        });
-
-
-        // ---------------------Shader Sources---------------------
-        let wgsl_src = include_str!("shaders/backward_nn.wgsl");
-        let backward_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
-            label: Some("backward_shader"),
-            source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
-        });
-
-        // ---------------------Bind Layout---------------------
-        let backward_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("backward_bind_layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: true,
-                        min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<BackwardDir>() as u64),
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let backward_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
-            label: Some("bg"),
-            layout: &backward_bind_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: param_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: act_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: backward_dir_binding },
-            ],
-        });
-
-            // ---------------------Update Meta---------------------
-
-        for layer_i in 0..nn_info.get_n_layers() - 1{
-            let backward_dir = BackwardDir::new(&nn_info, layer_i); 
-
-            queue.write_buffer(&backward_dir_buffer, layer_i as u64 * backward_slot, bytemuck::bytes_of(&backward_dir));
-        }
-
-        // ---------------------Pipeline Layout---------------------
-
-        let backward_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
-            label: Some("backward_pipeline_layout"),
-            bind_group_layouts: &[&backward_bind_layout],
-            push_constant_ranges: &[],
-        });
-
-        let backward_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("backward_pipeline"),
-            layout: Some(&backward_pipeline_layout),
-            module: &backward_shader,
-            entry_point: Some("main"),
-            cache: None,
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-        });
 
         // +--------------------------------------------------------+
         // |                                                        |
@@ -510,7 +298,7 @@ impl NNDispatch{
 
 
         // ---------------------Shader Sources---------------------
-        let wgsl_src = include_str!("shaders/gemm_i_io.wgsl");
+        let wgsl_src = include_str!("shaders/gemm_op/gemm_i_io.wgsl");
         let backward_deriv_mat_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
             label: Some("backward_deriv_gemm_shader"),
             source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
@@ -555,7 +343,7 @@ impl NNDispatch{
         // |                                                        |
         // |               Backward Gradient Pass                   |
         // |                                                        |
-        // +--------------------------------------------------------+ 
+        // +--------------------------------------------------------+
         
         let backward_gradient_mat_dir_buffer_size = gemm_mat_slot * (nn_info.get_n_layers() - 1) as u64;
 
@@ -575,7 +363,7 @@ impl NNDispatch{
 
 
         // ---------------------Shader Sources---------------------
-        let wgsl_src = include_str!("shaders/gemm_i_o.wgsl");
+        let wgsl_src = include_str!("shaders/gemm_op/gemm_i_o.wgsl");
         let backward_gradient_mat_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
             label: Some("backward_gradient_mat_gemm_shader"),
             source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
@@ -616,116 +404,13 @@ impl NNDispatch{
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
-
-        // +--------------------------------------------------------+
-        // |                                                        |
-        // |                    Gradient Pass                       |
-        // |                                                        |
-        // +--------------------------------------------------------+
-        
-        let gradient_slot   = ((std::mem::size_of::<GradientDir>() as u64 + align - 1) / align) * align;
-        let gradient_dir_buffer_size = gradient_slot as u64 * nn_info.n_batches as u64;
-
-        let gradient_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
-            label: Some("gradient_dir_buf"),
-            size: gradient_dir_buffer_size,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        // ---------------------Special Binding---------------------
-        let gradient_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-            buffer: &gradient_dir_buffer,
-            offset: 0,
-            size: Some(wgpu::BufferSize::new(gradient_slot).unwrap()),
-        });
-
-        // ---------------------Shader Sources---------------------
-        let wgsl_src = include_str!("shaders/apply_gradients.wgsl");
-        let gradient_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
-            label: Some("gradient_shader"),
-            source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
-        });
-
-        // ---------------------Bind Layout---------------------
-        let gradient_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("gradient_bind_layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: true,
-                        min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<GradientDir>() as u64),
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let gradient_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
-            label: Some("bg"),
-            layout: &gradient_bind_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: gradient_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: act_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: gradient_dir_binding },
-            ],
-        });
-
-            // ---------------------Update Meta---------------------
-
-        for batch_i in 0..nn_info.n_batches{
-            let gradient_dir = GradientDir::new(&nn_info, batch_i); 
-
-            queue.write_buffer(&gradient_dir_buffer, batch_i as u64 * gradient_slot, bytemuck::bytes_of(&gradient_dir));
-        }
-
-        // ---------------------Pipeline Layout---------------------
-
-        let gradient_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
-            label: Some("gradient_pipeline_layout"),
-            bind_group_layouts: &[&gradient_bind_layout],
-            push_constant_ranges: &[],
-        });
-
-        let gradient_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("gradient_pipeline"),
-            layout: Some(&gradient_pipeline_layout),
-            module: &gradient_shader,
-            entry_point: Some("main"),
-            cache: None,
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-        });
-
         // +--------------------------------------------------------+
         // |                                                        |
         // |                    Momentum Pass                       |
         // |                                                        |
         // +--------------------------------------------------------+
         
-        let momentum_slot   = ((std::mem::size_of::<GradientDir>() as u64 + align - 1) / align) * align;
+        let momentum_slot   = ((std::mem::size_of::<FlatApplyDir>() as u64 + align - 1) / align) * align;
         let momentum_dir_buffer_size = momentum_slot as u64 * nn_info.n_batches as u64;
 
         let momentum_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
@@ -743,7 +428,7 @@ impl NNDispatch{
         });
 
         // ---------------------Shader Sources---------------------
-        let wgsl_src = include_str!("shaders/apply_momentum.wgsl");
+        let wgsl_src = include_str!("shaders/apply_op/apply_momentum.wgsl");
         let momentum_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
             label: Some("momentum_shader"),
             source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
@@ -789,7 +474,7 @@ impl NNDispatch{
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: true,
-                        min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<GradientDir>() as u64),
+                        min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<FlatApplyDir>() as u64),
                     },
                     count: None,
                 },
@@ -810,7 +495,7 @@ impl NNDispatch{
         // ---------------------Update Meta---------------------
 
         for batch_i in 0..nn_info.n_batches{
-            let momentum_dir = GradientDir::new(&nn_info, batch_i); 
+            let momentum_dir = FlatApplyDir::new(&nn_info, batch_i); 
 
             queue.write_buffer(&momentum_dir_buffer, batch_i as u64 * momentum_slot, bytemuck::bytes_of(&momentum_dir));
         }
@@ -840,7 +525,7 @@ impl NNDispatch{
         // +--------------------------------------------------------+
         
         let error_slot   = ((std::mem::size_of::<ErrorDir>() as u64 + align - 1) / align) * align;
-        let error_dir_buffer_size = backward_slot as u64 * 1;
+        let error_dir_buffer_size = error_slot as u64 * 1;
 
         let error_dir = ErrorDir::new(&nn_info);
 
@@ -852,7 +537,7 @@ impl NNDispatch{
 
 
         // ---------------------Shader Sources---------------------
-        let wgsl_src = include_str!("shaders/apply_error.wgsl");
+        let wgsl_src = include_str!("shaders/apply_op/apply_error.wgsl");
         let error_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
             label: Some("error_shader"),
             source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
@@ -1019,16 +704,12 @@ impl NNDispatch{
         
         let gem_wg = vec![16, 16, 0];
 
-        let forward_pass_info = NNPassInfo::new(forward_dir_buffer, forward_shader, forward_bind_group, forward_pipeline, forward_slot, vec![64, 4, 0]);
 
         let forward_mat_pass_info = NNPassInfo::new(forward_mat_dir_buffer, forward_mat_shader, forward_mat_bind_group, forward_mat_pipeline, gemm_mat_slot, gem_wg.clone());
-
-        let backward_pass_info = NNPassInfo::new(backward_dir_buffer, backward_shader, backward_bind_group, backward_pipeline, backward_slot, vec![8, 8, 4]);
 
         let backward_deriv_mat_pass_info = NNPassInfo::new(backward_deriv_mat_dir_buffer, backward_deriv_mat_shader, backward_deriv_mat_bind_group, backward_deriv_mat_pipeline, gemm_mat_slot, gem_wg.clone());
         let backward_gradient_mat_pass_info = NNPassInfo::new(backward_gradient_mat_dir_buffer, backward_gradient_mat_shader, backward_gradient_mat_bind_group, backward_gradient_mat_pipeline, gemm_mat_slot, gem_wg.clone());
 
-        let gradient_pass_info = NNPassInfo::new(gradient_dir_buffer, gradient_shader, gradient_bind_group, gradient_pipeline, gradient_slot, vec![256, 0, 0]);
         let momentum_pass_info = NNPassInfo::new(momentum_dir_buffer, momentum_shader, momentum_bind_group, momentum_pipeline, momentum_slot, vec![256, 0, 0]);
 
         let error_pass_info = NNPassInfo::new(error_dir_buffer.clone(), error_shader, error_bind_group, error_pipeline, error_slot, vec![64, 0, 0]);
@@ -1051,12 +732,9 @@ impl NNDispatch{
             data_buffer,
             metric_buffer,
 
-            forward_pass_info,
             forward_mat_pass_info,
-            backward_pass_info,
             backward_deriv_mat_pass_info,
             backward_gradient_mat_pass_info,
-            gradient_pass_info,
             momentum_pass_info,
             error_pass_info,
             test_pass_info,
@@ -1064,35 +742,6 @@ impl NNDispatch{
             nn_info,
             data_reader,
         }
-    }
-
-    pub fn forward(&self){
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
-
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("cpass"),
-                timestamp_writes: None,
-            });
-
-            pass.set_pipeline(&self.forward_pass_info.pipeline);
-
-            for layer_i in 0..(self.nn_info.get_n_layers() - 1){
-                let dyn_off = layer_i as u32 * self.forward_pass_info.dir_slot_size as u32;
-                pass.set_bind_group(0, &self.forward_pass_info.bind_group, &[dyn_off]);
-
-                // println!("{} {}", self.forward_pass_info.workgroup_dim.x, self.forward_pass_info.workgroup_dim.y);
-
-                let gx = ceil_div(self.nn_info.get_dim_n(layer_i + 1), self.forward_pass_info.workgroup_dim.x);
-                let gy = ceil_div(self.nn_info.get_n_batches(), self.forward_pass_info.workgroup_dim.y);
-
-                pass.dispatch_workgroups(gx as u32, gy as u32, 1);
-            }
-        }
-
-        let forward_commands = encoder.finish();
-        self.queue.submit([forward_commands]);  
-        // self.device.poll(wgpu::PollType::Wait).unwrap();
     }
 
     pub fn forward_mat(&self){
@@ -1161,35 +810,6 @@ impl NNDispatch{
         self.queue.submit([backward_commands]); 
     }
 
-    pub fn backward(&self){
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
-
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("cpass"),
-                timestamp_writes: None,
-            });
-
-            pass.set_pipeline(&self.backward_pass_info.pipeline);
-
-            for layer_i in (0..(self.nn_info.get_n_layers() - 1)).rev(){
-                let dyn_off = layer_i as u32 * self.backward_pass_info.dir_slot_size as u32;
-                pass.set_bind_group(0, &self.backward_pass_info.bind_group, &[dyn_off]);
-                // println!("{} {} {}", self.forward_pass_info.workgroup_dim.x, self.forward_pass_info.workgroup_dim.y,self.forward_pass_info.workgroup_dim.z );
-
-                let gx = ceil_div(self.nn_info.get_dim_n(layer_i + 1), self.backward_pass_info.workgroup_dim.x);
-                let gy = ceil_div(self.nn_info.get_dim_n(layer_i) + 1, self.backward_pass_info.workgroup_dim.y);
-                let wz = ceil_div(self.nn_info.get_n_batches(), self.backward_pass_info.workgroup_dim.z);
-
-                pass.dispatch_workgroups(gx as u32, gy as u32, wz as u32);
-            }
-        }
-
-        let backward_commands = encoder.finish();
-        self.queue.submit([backward_commands]); 
-        // self.device.poll(wgpu::PollType::Poll).unwrap();
-    }
-
     pub fn set_data(&self){
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
 
@@ -1246,31 +866,6 @@ impl NNDispatch{
 
         let momentum_commands = encoder.finish();
         self.queue.submit([momentum_commands]); 
-    }
-
-    pub fn update_gradients(&self){
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
-
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("cpass"),
-                timestamp_writes: None,
-            });
-
-            pass.set_pipeline(&self.gradient_pass_info.pipeline);
-
-            for batch_i in 0..self.nn_info.n_batches{
-                let dyn_off = batch_i as u32 * self.gradient_pass_info.dir_slot_size as u32;
-                pass.set_bind_group(0, &self.gradient_pass_info.bind_group, &[dyn_off]);
-
-                let gx = ceil_div(self.nn_info.p_length , self.gradient_pass_info.workgroup_dim.x);
-
-                pass.dispatch_workgroups(gx as u32, 1, 1);
-            }
-        }
-
-        let gradient_commands = encoder.finish();
-        self.queue.submit([gradient_commands]); 
     }
 
     pub fn apply_error(&self){
@@ -1438,8 +1033,7 @@ impl NNDispatch{
         let data = slice.get_mapped_range();
         let out: &[f32] = bytemuck::cast_slice(&data);
 
-        println!("v: {:?}", &out[self.nn_info.activity_info.s_start as usize..self.nn_info.activity_info.g_start as usize]);
-        println!("g: {:?}", &out[self.nn_info.activity_info.g_start as usize..self.nn_info.activity_info.d_start  as usize]);
+        println!("v: {:?}", &out[self.nn_info.activity_info.s_start as usize..self.nn_info.activity_info.d_start as usize]);
         println!("p1: {:?}", &out[self.nn_info.activity_info.d_start as usize..(self.nn_info.activity_info.d_start + self.nn_info.activity_info.a_deriv_buffer_size ) as usize]);
         println!("p2: {:?}", &out[(self.nn_info.activity_info.d_start + self.nn_info.activity_info.a_deriv_buffer_size) as usize..(self.nn_info.activity_info.d_start + self.nn_info.activity_info.a_deriv_buffer_size * 2) as usize]);
 
