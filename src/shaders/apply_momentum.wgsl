@@ -21,7 +21,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    let momentum_value = momentum[param_i] * nn_dir.mr + gradients[param_i] * nn_dir.lr;
+    let momentum_value = momentum[param_i] * nn_dir.mr + gradients[param_i] * nn_dir.lr * nn_dir.batch_contribution;
 
     params[param_i] += momentum_value;
     momentum[param_i] = momentum_value;

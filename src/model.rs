@@ -95,10 +95,15 @@ impl BasicNNModel{
 
         self.dispatch.apply_error();
 
+        // self.dispatch.backward();
+        // self.dispatch.update_gradients();
         self.dispatch.backward_mat();
 
         self.dispatch.read_back_act_single();
 
+        println!("");
+        self.dispatch.read_back_gradients();
+        println!("");
         self.dispatch.read_back_params();
 
     }
@@ -129,10 +134,11 @@ impl BasicNNModel{
                     
                     self.dispatch.apply_error();
                     
-                    self.dispatch.backward();
+                    // self.dispatch.backward();
+                    self.dispatch.backward_mat();
                     
                     
-                    self.dispatch.update_gradients();
+                    // self.dispatch.update_gradients();
                     self.dispatch.update_momentum();
                     
                     self.dispatch.data_reader.increment_sub_batch();

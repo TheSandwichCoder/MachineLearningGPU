@@ -115,10 +115,10 @@ impl NNDispatch{
 
         // ---------------------Data Reader---------------------
         let mut data_reader = DataReader::new(data_path, (n_batches * data_per_batch) as usize, n_batches as usize);
-        data_reader.initialise_params_debug();
-        data_reader.load_batch_debug();
-        // data_reader.initialise_params_mnist();
-        // data_reader.load_batch_mnist();
+        // data_reader.initialise_params_debug();
+        // data_reader.load_batch_debug();
+        data_reader.initialise_params_mnist();
+        data_reader.load_batch_mnist();
         
         // ---------------------Buffer Stuff---------------------
         let param_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
@@ -149,8 +149,8 @@ impl NNDispatch{
 
         let out_buffer = device.create_buffer(&wgpu::BufferDescriptor{
             label: Some("out_buf"),
-            // size: (p_dir.buffer_size * std::mem::size_of::<f32>()) as u64,
-            size: (2000 * std::mem::size_of::<f32>()) as u64,
+            size: (p_dir.buffer_size * std::mem::size_of::<f32>()) as u64,
+            // size: (2000 * std::mem::size_of::<f32>()) as u64,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -528,10 +528,10 @@ impl NNDispatch{
 
             // ---------------------Update Meta---------------------
 
-        for layer_i in 0..nn_info.get_n_layers() - 1{
+        for layer_i in 1..nn_info.get_n_layers(){
             let mat_dir = MatrixDir::new_backward_deriv(&nn_info, layer_i); 
 
-            queue.write_buffer(&backward_deriv_mat_dir_buffer, layer_i as u64 * gemm_mat_slot, bytemuck::bytes_of(&mat_dir));
+            queue.write_buffer(&backward_deriv_mat_dir_buffer, (layer_i - 1) as u64 * gemm_mat_slot, bytemuck::bytes_of(&mat_dir));
         }
 
         // ---------------------Pipeline Layout---------------------
@@ -555,8 +555,8 @@ impl NNDispatch{
         // |                                                        |
         // |               Backward Gradient Pass                   |
         // |                                                        |
-        // +--------------------------------------------------------+
-        // 
+        // +--------------------------------------------------------+ 
+        
         let backward_gradient_mat_dir_buffer_size = gemm_mat_slot * (nn_info.get_n_layers() - 1) as u64;
 
         let backward_gradient_mat_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
@@ -585,7 +585,7 @@ impl NNDispatch{
             label: Some("bg"),
             layout: &gemm_bind_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: param_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: act_buffer.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: gradient_buffer.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 2, resource: backward_gradient_mat_dir_binding },
             ],
@@ -622,7 +622,7 @@ impl NNDispatch{
         // |                    Gradient Pass                       |
         // |                                                        |
         // +--------------------------------------------------------+
-
+        
         let gradient_slot   = ((std::mem::size_of::<GradientDir>() as u64 + align - 1) / align) * align;
         let gradient_dir_buffer_size = gradient_slot as u64 * nn_info.n_batches as u64;
 
@@ -724,7 +724,7 @@ impl NNDispatch{
         // |                    Momentum Pass                       |
         // |                                                        |
         // +--------------------------------------------------------+
-
+        
         let momentum_slot   = ((std::mem::size_of::<GradientDir>() as u64 + align - 1) / align) * align;
         let momentum_dir_buffer_size = momentum_slot as u64 * nn_info.n_batches as u64;
 
@@ -838,7 +838,7 @@ impl NNDispatch{
         // |                      Error Pass                        |
         // |                                                        |
         // +--------------------------------------------------------+
-
+        
         let error_slot   = ((std::mem::size_of::<ErrorDir>() as u64 + align - 1) / align) * align;
         let error_dir_buffer_size = backward_slot as u64 * 1;
 
@@ -930,7 +930,7 @@ impl NNDispatch{
         // |                    Testing Pass                        |
         // |                                                        |
         // +--------------------------------------------------------+
-
+        
         // ---------------------Shader Sources---------------------
         let wgsl_src = include_str!("shaders/test_model.wgsl");
         let test_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
@@ -1015,6 +1015,7 @@ impl NNDispatch{
             cache: None,
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
+        
         
         let gem_wg = vec![16, 16, 0];
 
@@ -1130,21 +1131,29 @@ impl NNDispatch{
                 timestamp_writes: None,
             });
 
-            pass.set_pipeline(&self.backward_deriv_mat_pass_info.pipeline);
-
-            for layer_i in (0..(self.nn_info.get_n_layers() - 1)).rev(){
-
-                if layer_i == self.nn_info.get_n_layers() - 2{
-                    continue;
+            
+            for layer_i in (1..self.nn_info.get_n_layers()).rev(){
+                let dyn_off = (layer_i - 1) as u32 * self.backward_deriv_mat_pass_info.dir_slot_size as u32;
+                
+                pass.set_pipeline(&self.backward_deriv_mat_pass_info.pipeline);
+                if layer_i != self.nn_info.get_n_layers() - 1{
+                    pass.set_bind_group(0, &self.backward_deriv_mat_pass_info.bind_group, &[dyn_off]);
+    
+                    let gx = ceil_div(self.nn_info.layer_dim[layer_i], self.backward_deriv_mat_pass_info.workgroup_dim.x);
+                    let gy = ceil_div(self.nn_info.n_batches, self.backward_deriv_mat_pass_info.workgroup_dim.y);
+    
+                    pass.dispatch_workgroups(gx as u32, gy as u32, 1);
                 }
-                let dyn_off = layer_i as u32 * self.backward_deriv_mat_pass_info.dir_slot_size as u32;
-                pass.set_bind_group(0, &self.backward_deriv_mat_pass_info.bind_group, &[dyn_off]);
-                // println!("{} {} {}", self.forward_pass_info.workgroup_dim.x, self.forward_pass_info.workgroup_dim.y,self.forward_pass_info.workgroup_dim.z );
 
-                let gx = ceil_div(self.nn_info.layer_dim[layer_i + 1], self.backward_deriv_mat_pass_info.workgroup_dim.x);
-                let gy = ceil_div(self.nn_info.n_batches, self.backward_deriv_mat_pass_info.workgroup_dim.y);
+                pass.set_pipeline(&self.backward_gradient_mat_pass_info.pipeline);
+                
+                pass.set_bind_group(0, &self.backward_gradient_mat_pass_info.bind_group, &[dyn_off]);
+    
+                let gx = ceil_div(self.nn_info.layer_dim[layer_i], self.backward_gradient_mat_pass_info.workgroup_dim.x);
+                let gy = ceil_div(self.nn_info.layer_dim[layer_i - 1], self.backward_gradient_mat_pass_info.workgroup_dim.y);
 
                 pass.dispatch_workgroups(gx as u32, gy as u32, 1);
+
             }
         }
 
@@ -1189,7 +1198,8 @@ impl NNDispatch{
         let curr_batch_start = self.data_reader.sub_batch_i * self.data_reader.sub_batch_length * data_slot;
 
         for batch_i in 0..self.nn_info.n_batches{
-            let write_i = batch_i * self.nn_info.activity_info.a_length;
+            let write_i_swap = batch_i * self.nn_info.activity_info.a_length;
+            let write_i_storage = batch_i * self.nn_info.activity_info.a_length + self.nn_info.activity_info.s_start;
 
             let read_i = batch_i * (self.data_reader.data_value_size + 1) + curr_batch_start + 1; // plus one to skip the label
 
@@ -1197,7 +1207,15 @@ impl NNDispatch{
                 &self.data_buffer, 
                 (read_i * 4) as u64, 
                 &self.act_buffer, 
-                (write_i * 4) as u64, 
+                (write_i_swap * 4) as u64, 
+                (self.data_reader.data_value_size * 4) as u64
+            );
+            
+            encoder.copy_buffer_to_buffer(
+                &self.data_buffer, 
+                (read_i * 4) as u64, 
+                &self.act_buffer, 
+                (write_i_storage * 4) as u64, 
                 (self.data_reader.data_value_size * 4) as u64
             );
         }
@@ -1420,15 +1438,34 @@ impl NNDispatch{
         let data = slice.get_mapped_range();
         let out: &[f32] = bytemuck::cast_slice(&data);
 
-        println!("v: {:?}", &out[..self.nn_info.activity_info.g_start  as usize]);
+        println!("v: {:?}", &out[self.nn_info.activity_info.s_start as usize..self.nn_info.activity_info.g_start as usize]);
         println!("g: {:?}", &out[self.nn_info.activity_info.g_start as usize..self.nn_info.activity_info.d_start  as usize]);
         println!("p1: {:?}", &out[self.nn_info.activity_info.d_start as usize..(self.nn_info.activity_info.d_start + self.nn_info.activity_info.a_deriv_buffer_size ) as usize]);
         println!("p2: {:?}", &out[(self.nn_info.activity_info.d_start + self.nn_info.activity_info.a_deriv_buffer_size) as usize..(self.nn_info.activity_info.d_start + self.nn_info.activity_info.a_deriv_buffer_size * 2) as usize]);
 
-        
-
         drop(data);
         self.out_buffer.unmap();
+    }
+
+    pub fn read_back_gradients(&self){
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
+        
+        encoder.copy_buffer_to_buffer(&self.gradient_buffer, 0, &self.out_buffer, 0, self.nn_info.p_length as u64 *4);
+
+        self.queue.submit(Some(encoder.finish()));
+
+        let slice = self.out_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| ());
+        self.device.poll(wgpu::PollType::Wait).unwrap();
+
+        // Now it's safe to read.
+        let data = slice.get_mapped_range();
+        let out: &[f32] = bytemuck::cast_slice(&data);
+
+        self.nn_info.read_readback(out);
+
+        drop(data);
+        self.out_buffer.unmap()
     }
 
     pub fn read_back_raw(&self, n_floats: u64){

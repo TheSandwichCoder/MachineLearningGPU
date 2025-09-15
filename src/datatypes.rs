@@ -115,6 +115,18 @@ fn vec_dot_f(vec1: &[f32], vec2: &[f32]) -> f32{
     return n;
 }
 
+fn get_vec_max(vec: &Vec<usize>) -> usize{
+    let mut largest = 0;
+
+    for n in vec{
+        if *n > largest{
+            largest = *n;
+        }
+    }
+
+    return largest;
+}
+
 #[derive(Clone)]
 struct TensorInfo{
     offset: usize,
@@ -160,10 +172,12 @@ impl TensorInfo{
 
 // Activity Info
 // Consists of:
-// 1. activity layers (array)
-// 2. activity layer gradients (tensor)
-// 3. deriv ping pong buffer 1 (array)
-// 4. deriv ping pong buffer 2 (array)
+// 1. activity ping pong buffer 1 (array)
+// 2. activity ping pong buffer 2 (array)
+// 3. pre-activition storage (array)
+// 4. activity layer gradients (tensor)
+// 5. deriv ping pong buffer 1 (array)
+// 6. deriv ping pong buffer 2 (array)
 
 #[derive(Clone)]
 pub struct ActivityInfo{
@@ -171,9 +185,12 @@ pub struct ActivityInfo{
     pub a_dim: Vec<usize>,
     pub a_strides: Vec<usize>,
     pub a_gradients: Vec<TensorInfo>,
+
+    pub a_swap_buffer_size: usize,
     pub a_deriv_buffer_size: usize,
     pub a_length: usize,
     
+    pub s_start: usize,
     pub g_start: usize,
     pub d_start: usize,
 }
@@ -185,43 +202,60 @@ impl ActivityInfo{
             a_dim: Vec::new(),
             a_strides: Vec::new(),
             a_gradients: Vec::new(),
+
+            a_swap_buffer_size: 0,
             a_deriv_buffer_size: 0,
             a_length: 0,
-            g_start: 0,
-            d_start: 0,
+
+            s_start: 0, // activition storage
+            g_start: 0, // gradients
+            d_start: 0, // derivative ping pong
         }
     }
 
     pub fn new(a_dim: &Vec<usize>) -> Self{
+        let largest_layer = get_vec_max(a_dim);
+
+        let mut t_length = 0;
+
+        t_length += largest_layer * 2;
+
+        let s_start = t_length;
+
         let a_strides = get_activity_strides(a_dim);
-        let mut a_length = get_activity_length(a_dim);
+        t_length += get_activity_length(a_dim);
+
         let deriv_buffer_size = get_activity_deriv_buffer_size(a_dim);
         let mut gradient_info = Vec::new();
 
-        let g_start = a_length;
+        let g_start = t_length;
 
         for layer_i in 0..(a_dim.len() - 1){
 
             let mut tensor_info_i = TensorInfo::new(&vec![1, a_dim[layer_i + 1], a_dim[layer_i] + 1]);
 
-            tensor_info_i.offset = a_length;
+            tensor_info_i.offset = t_length;
 
-            a_length += tensor_info_i.tens_length;
+            t_length += tensor_info_i.tens_length;
 
             gradient_info.push(tensor_info_i);
         }
 
-        let d_start = a_length;
+        let d_start = t_length;
 
-        a_length += deriv_buffer_size * 2;
+        t_length += deriv_buffer_size * 2;
 
         return ActivityInfo{
             offset: 0,
             a_dim: a_dim.clone(),
             a_strides: a_strides.clone(),
             a_gradients: gradient_info.clone(),
+
+            a_swap_buffer_size: largest_layer,
             a_deriv_buffer_size: deriv_buffer_size,
-            a_length: a_length,
+            a_length: t_length,
+
+            s_start: s_start,
             g_start: g_start,
             d_start: d_start,
         }
@@ -448,13 +482,13 @@ impl ForwardDir{
         }
 
         ForwardDir{
-            read_layer_start: nn_info.activity_info.a_strides[dir_i] as u32,
+            read_layer_start: nn_info.activity_info.s_start as u32 + nn_info.activity_info.a_strides[dir_i] as u32,
             read_layer_length: nn_info.activity_info.a_dim[dir_i] as u32,
             
             param_layer_start: nn_info.layer_info[dir_i].offset as u32,
             param_layer_length: nn_info.activity_info.a_dim[dir_i] as u32 + 1,
 
-            write_layer_start: nn_info.activity_info.a_strides[dir_i + 1] as u32,
+            write_layer_start: nn_info.activity_info.s_start as u32 + nn_info.activity_info.a_strides[dir_i + 1] as u32,
             write_layer_length: nn_info.activity_info.a_dim[dir_i + 1] as u32,
 
             n_batches: nn_info.n_batches as u32,
@@ -526,13 +560,13 @@ impl BackwardDir{
 
 
         BackwardDir{
-            prev_layer_start: nn_info.activity_info.a_strides[dir_i] as u32,
+            prev_layer_start: nn_info.activity_info.s_start as u32 + nn_info.activity_info.a_strides[dir_i] as u32,
             prev_layer_length: nn_info.activity_info.a_dim[dir_i] as u32,
 
             param_layer_start: nn_info.layer_info[dir_i].offset as u32,
             param_layer_length: nn_info.activity_info.a_dim[dir_i] as u32 + 1,
 
-            curr_layer_start: nn_info.activity_info.a_strides[dir_i + 1] as u32,
+            curr_layer_start: nn_info.activity_info.s_start as u32 + nn_info.activity_info.a_strides[dir_i + 1] as u32,
             curr_layer_length: nn_info.activity_info.a_dim[dir_i + 1] as u32,
 
             next_layer_start: next_layer_start,
@@ -597,7 +631,7 @@ impl ErrorDir{
         
         return ErrorDir{
             act_size: nn_info.activity_info.a_length as u32,
-            outputs_offset: nn_info.activity_info.a_strides[last_layer_i] as u32,
+            outputs_offset: nn_info.activity_info.s_start as u32 + nn_info.activity_info.a_strides[last_layer_i] as u32,
             n_outputs: nn_info.activity_info.a_dim[last_layer_i] as u32,
             ping_start: (nn_info.activity_info.d_start + ping_switch * nn_info.activity_info.a_deriv_buffer_size) as u32,
             data_size: nn_info.layer_dim[0] as u32, // temporary
@@ -645,6 +679,22 @@ impl TestMetrics{
     }
 }
 
+fn make_transpose(n: bool, m: bool, o: bool) -> u32{
+    let mut v : u32 = 0;
+
+    if n{
+        v |= 1 << 0;
+    }
+    if m{
+        v |= 1 << 1;
+    }
+    if o{
+        v |= 1 << 2;
+    }
+
+    return v;
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct MatrixDir{
@@ -662,6 +712,12 @@ pub struct MatrixDir{
     c_stride_length: u32,
     a_func_type: u32,
 
+    extra: u32,
+    e_start: u32,
+    e_stride_length: u32,    
+
+    transpose: u32,
+
     n: u32,
     m: u32,
     k: u32
@@ -674,22 +730,58 @@ impl MatrixDir{
     m: activity
     w: activity
     */
+    pub fn null() -> Self{
+        MatrixDir{
+            n_read_start: 0,
+            m_read_start: 0,
+
+            n_stride_length: 0,
+            m_stride_length: 0,
+            
+            w_start: 0,
+            w_stride_length: 0,
+
+            add_const: 0,
+            c_start: 0,
+            c_stride_length: 0,
+            a_func_type: 0,
+
+            extra: 0,
+            e_start: 0,
+            e_stride_length: 0,    
+
+            transpose: 0,
+
+            n: 0,
+            m: 0,
+            k: 0,
+        }
+    }
+
     pub fn new_forward(nn_info: &NeuralNetworkInfo, dir_i: usize) -> Self{
+        let ping_switch = dir_i % 2;
+        let pong_switch = (dir_i + 1) % 2;
+
         return MatrixDir{
             n_read_start: nn_info.layer_info[dir_i].offset as u32,
-            m_read_start: nn_info.activity_info.a_strides[dir_i] as u32,
+            m_read_start: nn_info.activity_info.a_swap_buffer_size as u32 * ping_switch as u32,
 
             n_stride_length: (nn_info.layer_dim[dir_i] + 1) as u32,
             m_stride_length: nn_info.activity_info.a_length as u32,
 
-            w_start: nn_info.activity_info.a_strides[dir_i + 1] as u32,
+            w_start: nn_info.activity_info.a_swap_buffer_size as u32 * pong_switch as u32,
             w_stride_length: nn_info.activity_info.a_length as u32,
 
             add_const: 1,
             c_start: (nn_info.layer_info[dir_i].offset + nn_info.layer_dim[dir_i])  as u32,
             c_stride_length: (nn_info.layer_dim[dir_i] + 1) as u32,
             a_func_type: 1,
-            
+
+            extra: 1,
+            e_start: nn_info.activity_info.s_start as u32 + nn_info.activity_info.a_strides[dir_i + 1] as u32,
+            e_stride_length: nn_info.activity_info.a_length as u32,
+
+            transpose: make_transpose(false, false, false),
 
             n: nn_info.layer_dim[dir_i + 1] as u32,
             m: nn_info.n_batches as u32,
@@ -703,14 +795,20 @@ impl MatrixDir{
 
         let ping_pong_default = nn_info.activity_info.d_start;
 
+        let n_start: u32;
+        if dir_i >= nn_info.n_layers - 1{
+            return MatrixDir::null();
+        }
+
+
         return MatrixDir{            
             n_read_start: nn_info.layer_info[dir_i].offset as u32,
-            m_read_start: (ping_pong_default + nn_info.activity_info.a_deriv_buffer_size * pong_switch) as u32,
+            m_read_start: (ping_pong_default + nn_info.activity_info.a_deriv_buffer_size * ping_switch) as u32,
 
             n_stride_length: (nn_info.layer_dim[dir_i] + 1) as u32,
             m_stride_length: nn_info.activity_info.a_length as u32,
 
-            w_start : (ping_pong_default + nn_info.activity_info.a_deriv_buffer_size * ping_switch) as u32,
+            w_start : (ping_pong_default + nn_info.activity_info.a_deriv_buffer_size * pong_switch) as u32,
             w_stride_length: nn_info.activity_info.a_length as u32,
 
             add_const: 0,
@@ -718,21 +816,28 @@ impl MatrixDir{
             c_stride_length: 0,
             a_func_type: 2,
 
-            n: nn_info.layer_dim[dir_i + 1] as u32,
+            extra: 2,
+            e_start: nn_info.activity_info.s_start as u32 + nn_info.activity_info.a_strides[dir_i] as u32,
+            e_stride_length: nn_info.activity_info.a_length as u32,
+
+            transpose: make_transpose(true, false, false),
+
+            n: nn_info.layer_dim[dir_i] as u32,
             m: nn_info.n_batches as u32,
-            k: nn_info.layer_dim[dir_i] as u32,
+            k: nn_info.layer_dim[dir_i + 1] as u32,
         }
     }
 
     pub fn new_backward_gradients(nn_info: &NeuralNetworkInfo, dir_i: usize) -> Self{
-        let ping_switch = dir_i % 2;
-        let pong_switch = (dir_i + 1) % 2;
+        // have to add 1 to compensate
+        let ping_switch = (dir_i + 1) % 2;
+        let pong_switch = (dir_i + 1 + 1) % 2;
 
         let ping_pong_default = nn_info.activity_info.d_start;
 
         return MatrixDir{
             n_read_start: (ping_pong_default + nn_info.activity_info.a_deriv_buffer_size * pong_switch) as u32,
-            m_read_start: nn_info.activity_info.a_strides[dir_i + 1] as u32,
+            m_read_start: nn_info.activity_info.s_start as u32 + nn_info.activity_info.a_strides[dir_i] as u32,
 
             n_stride_length: nn_info.activity_info.a_length as u32,
             m_stride_length: nn_info.activity_info.a_length as u32,
@@ -744,6 +849,12 @@ impl MatrixDir{
             c_start: 0,
             c_stride_length: 0,
             a_func_type: 0,
+
+            extra: 2,
+            e_start: 0,
+            e_stride_length: 0,
+
+            transpose: make_transpose(true, true, true),
 
             n: nn_info.layer_dim[dir_i + 1] as u32,
             m: nn_info.layer_dim[dir_i] as u32,
@@ -790,13 +901,13 @@ impl ParamsDir{
     }
 
     pub fn create_buffer(&self) -> Vec<f32>{
-        let mut out : Vec<f32> = Vec::new();
+        // let mut out : Vec<f32> = Vec::new();
 
-        for i in 0..self.buffer_size{
-            out.push(i as f32);
-        }
+        // for i in 0..self.buffer_size{
+        //     out.push(i as f32);
+        // }
 
-        return out;
+        // return out;
 
         let mut rng = rand::thread_rng();
 

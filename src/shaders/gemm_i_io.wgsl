@@ -13,6 +13,12 @@ struct MatrixDir{
     c_stride_length: u32,
     a_func_type: u32,
 
+    extra: u32,
+    e_start: u32,
+    e_stride_length: u32,
+
+    transpose: u32,
+
     n: u32,
     m: u32,
     k: u32
@@ -28,6 +34,10 @@ struct MatrixDir{
 const T_K : u32 = 16;
 const T_N : u32 = 16;
 const T_M : u32 = 16;
+
+const N_TRANSPOSE: u32 = 0;
+const M_TRANSPOSE: u32 = 1;
+const O_TRANSPOSE: u32 = 2;
 
 var<workgroup> a_sub : array<array<f32, T_K>, T_M>; 
 var<workgroup> b_sub : array<array<f32, T_N>, T_K>; 
@@ -62,10 +72,20 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
         // assignment for forward
 
         if (g_n < mat_dir.n && l_m_i < mat_dir.k){
-            a_sub[t_n][t_m] = read_buffer1[mat_dir.n_read_start + mat_dir.n_stride_length * g_n + l_m_i];            
+            if !read_transpose(mat_dir.transpose, N_TRANSPOSE){
+                a_sub[t_n][t_m] = read_buffer1[mat_dir.n_read_start + mat_dir.n_stride_length * g_n + l_m_i];
+            }
+            else{
+                a_sub[t_n][t_m] = read_buffer1[mat_dir.n_read_start + mat_dir.n_stride_length * l_m_i + g_n];
+            }
         }
         if (g_m < mat_dir.m && l_n_i < mat_dir.k){
-            b_sub[t_n][t_m] = read_buffer2[mat_dir.m_read_start + mat_dir.m_stride_length * g_m + l_n_i];
+            if !read_transpose(mat_dir.transpose, M_TRANSPOSE){
+                b_sub[t_n][t_m] = read_buffer2[mat_dir.m_read_start + mat_dir.m_stride_length * g_m + l_n_i];
+            }
+            else{
+                b_sub[t_n][t_m] = read_buffer2[mat_dir.m_read_start + mat_dir.m_stride_length * l_n_i + g_m];
+            }
         }    
         
 
@@ -92,15 +112,34 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
             v += read_buffer1[mat_dir.c_read_start + mat_dir.c_stride_length * g_n];
         }
 
+        if (mat_dir.extra == 1){
+            read_buffer2[mat_dir.e_start + mat_dir.e_stride_length * g_m + g_n] = v;
+        }
+        
+
         if (mat_dir.a_func_type == 0){
 
         }
         else if (mat_dir.a_func_type == 1){
             v = ReLu(v);
         }
+        else if (mat_dir.a_func_type == 2){
+            let a = read_buffer2[mat_dir.e_start + mat_dir.e_stride_length * g_m + g_n];
+            v *= dReLu(a);
+        }
 
-        read_buffer2[mat_dir.w_start + mat_dir.w_stride_length * g_m + g_n] = v;    
+
+        if !read_transpose(mat_dir.transpose, O_TRANSPOSE){
+            read_buffer2[mat_dir.w_start + mat_dir.w_stride_length * g_m + g_n] = v;    
+        }
+        else{
+            read_buffer2[mat_dir.w_start + mat_dir.w_stride_length * g_n + g_m] = v;    
+        }
     }
+}
+
+fn read_transpose(x: u32, i: u32) -> bool{
+    return (x & u32(1 << i)) != 0;
 }
 
 fn ReLu(x: f32) -> f32{
