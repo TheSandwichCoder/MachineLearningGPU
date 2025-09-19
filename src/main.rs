@@ -3,26 +3,15 @@ use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
 use std::time::Instant;
 
-mod datatypes;
 mod dispatch;
 mod data_reader;
 mod model;
+mod gpu_dirs;
+mod datatypes;
 
 use crate::datatypes::*;
 use crate::dispatch::*;
 use crate::model::*;
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct Meta {
-    len: u32,
-    _pad: [u32; 6],
-    scale: f32, // note: uniform layout rules are strict; this keeps it simple
-    // Uniform buffers are read in 16B chunks; extra padding is fine.
-}
-
-
-
 
 fn main() {
     // pollster::block_on(run());

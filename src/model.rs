@@ -1,5 +1,5 @@
 use crate::dispatch::NNDispatch;
-use crate::datatypes::NeuralNetworkInfo;
+use crate::datatypes::nn_datatypes::*;
 use std::time::{Duration, Instant};
 
 #[derive(Clone)]

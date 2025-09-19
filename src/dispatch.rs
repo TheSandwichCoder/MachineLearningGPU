@@ -5,6 +5,8 @@ use std::fs;
 
 use crate::datatypes::*;
 use crate::data_reader::DataReader;
+use crate::gpu_dirs::nn_dirs::*;
+use crate::datatypes::nn_datatypes::*;
 
 struct WorkgroupDim{
     x: usize,

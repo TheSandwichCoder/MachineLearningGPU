@@ -2,6 +2,7 @@ use bytemuck::{Pod, Zeroable};
 use itertools::Itertools;
 use crate::data_reader::DataReader;
 use rand::Rng;
+use crate::tensor::*;
 
 fn activation(z: f32) -> f32{
     return z;
@@ -9,30 +10,6 @@ fn activation(z: f32) -> f32{
 
 fn deriv_activation(z: f32) -> f32{
     return 1.0;
-}
-
-fn get_tensor_size(tens_dim: &[usize]) -> usize{
-    let mut size: usize = 1;
-
-    for n in tens_dim{
-        size *= n;
-    } 
-
-    return size;
-}
-
-fn get_tensor_strides(tens_dim: &Vec<usize>) -> Vec<usize>{
-    let n_dim = tens_dim.len();
-    
-    let mut strides: Vec<usize> = vec![0; n_dim];
-
-    for i in 0..(n_dim - 1){
-        strides[i] = get_tensor_size(&tens_dim[(i + 1)..n_dim]);
-    }
-
-    strides[n_dim - 1] = 1;
-
-    return strides;
 }
 
 fn get_activity_strides(a_dim: &Vec<usize>) -> Vec<usize>{
@@ -77,44 +54,6 @@ fn get_activity_deriv_buffer_size(a_dim: &Vec<usize>) -> usize{
     return highest_product;
 }
 
-fn vec_dot(vec1: &Vec<usize>, vec2: &Vec<usize>) -> usize{
-    let l1 = vec1.len();
-    let l2 = vec2.len();
-
-    let mut n : usize = 0;
-
-    if l1 != l2{
-        panic!("Vectors are not same length");
-    }
-
-    else{
-        for i in 0..l1{
-            n += vec1[i] * vec2[i];
-        }
-    }
-
-    return n;
-}
-
-fn vec_dot_f(vec1: &[f32], vec2: &[f32]) -> f32{
-    let l1 = vec1.len();
-    let l2 = vec2.len();
-
-    let mut n : f32 = 0.0;
-
-    if l1 != l2{
-        panic!("Vectors are not same length");
-    }
-
-    else{
-        for i in 0..l1{
-            n += vec1[i] * vec2[i];
-        }
-    }
-
-    return n;
-}
-
 fn get_vec_max(vec: &Vec<usize>) -> usize{
     let mut largest = 0;
 
@@ -125,49 +64,6 @@ fn get_vec_max(vec: &Vec<usize>) -> usize{
     }
 
     return largest;
-}
-
-#[derive(Clone)]
-struct TensorInfo{
-    offset: usize,
-    tens_dim: Vec<usize>,
-    tens_n_dim: usize,
-    tens_strides: Vec<usize>,
-    tens_length: usize,
-}
-
-impl TensorInfo{
-    pub fn null() -> Self{
-        return TensorInfo{
-            offset: 0,
-            tens_dim: Vec::new(),
-            tens_n_dim: 0,
-            tens_strides: Vec::new(),
-            tens_length: 0,
-        };
-    }
-    
-    pub fn new(tens_dim: &Vec<usize>) -> Self{
-        return TensorInfo{
-            offset: 0,
-            tens_dim: tens_dim.clone(),
-            tens_n_dim: tens_dim.len(),
-            tens_strides: get_tensor_strides(tens_dim),
-            tens_length: get_tensor_size(tens_dim),
-        }
-    }
-
-    // start idx + slice length -> (mem_start, mem_end)
-    pub fn get_slice(&self, idx_coord: &Vec<usize>, slice_length: usize) -> (usize, usize){
-        let start_i = self.get_index(idx_coord);
-        let end_i = start_i + slice_length;
-
-        return (start_i, end_i);
-    }
-
-    pub fn get_index(&self, idx_coord: &Vec<usize>) -> usize{
-        return vec_dot(&self.tens_strides, idx_coord) + self.offset;
-    }
 }
 
 // Activity Info
@@ -420,297 +316,6 @@ impl NeuralNetworkInfo{
 
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-pub struct FlatApplyDir{
-    batch_start_i: u32,
-    batch_i: u32,
-    gradient_start_i: u32,
-    batch_contribution: f32,
-    n_params: u32,
-    lr: f32,
-    mr: f32,
-}
-
-impl FlatApplyDir{
-    pub fn new(nn_info : &NeuralNetworkInfo, dir_i: usize) -> Self{
-        return FlatApplyDir{
-            batch_start_i: nn_info.activity_info.a_length as u32 * dir_i as u32,
-            batch_i: dir_i as u32,
-            gradient_start_i: 0,
-            batch_contribution: 1.0 / nn_info.n_batches as f32,
-            n_params: nn_info.p_length as u32,
-            lr: nn_info.lr,
-            mr: nn_info.mr,
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-pub struct ErrorDir{
-    act_size: u32,
-    outputs_offset: u32,
-    n_outputs: u32,
-    ping_start: u32,
-    data_size: u32,
-}
-
-impl ErrorDir{
-    pub fn new(nn_info: &NeuralNetworkInfo) -> Self{
-        let last_layer_i = nn_info.n_layers - 1;
-
-        let ping_switch = (last_layer_i - 1) % 2;
-        
-        return ErrorDir{
-            act_size: nn_info.activity_info.a_length as u32,
-            outputs_offset: nn_info.activity_info.s_start as u32 + nn_info.activity_info.a_strides[last_layer_i] as u32,
-            n_outputs: nn_info.activity_info.a_dim[last_layer_i] as u32,
-            ping_start: (nn_info.activity_info.d_start + ping_switch * nn_info.activity_info.a_deriv_buffer_size) as u32,
-            data_size: nn_info.layer_dim[0] as u32, // temporary
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-pub struct ErrorPC{
-    layer_idx: u32,
-    n_batches: u32,
-    _pad2: u32,
-    _pad3: u32,
-}
-
-impl ErrorPC{
-    pub fn new(dr: &DataReader, n_batches: usize) -> Self{
-        return ErrorPC{
-            layer_idx: (dr.load_batch_length * (dr.data_value_size + 1) * dr.load_batch_i + dr.sub_batch_length * (dr.data_value_size + 1) * dr.sub_batch_i) as u32,
-            n_batches: n_batches as u32,
-            _pad2: 0,
-            _pad3: 0,   
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-pub struct TestMetrics{
-    correct: u32,
-    incorrect: u32,
-    _pad1: u32,
-    _pad2: u32,
-}
-
-impl TestMetrics{
-    pub fn zero() -> Self{
-        return TestMetrics{
-             correct: 0,
-             incorrect: 0,
-             _pad1: 0,
-             _pad2: 0,
-        }
-    }
-}
-
-fn make_transpose(n: bool, m: bool, o: bool) -> u32{
-    let mut v : u32 = 0;
-
-    if n{
-        v |= 1 << 0;
-    }
-    if m{
-        v |= 1 << 1;
-    }
-    if o{
-        v |= 1 << 2;
-    }
-
-    return v;
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-pub struct MatrixDir{
-    n_read_start: u32,
-    m_read_start: u32,
-
-    n_stride_length: u32,
-    m_stride_length: u32,
-    
-    w_start: u32,
-    w_stride_length: u32,
-
-    add_const: u32,
-    c_start: u32,
-    c_stride_length: u32,
-    a_func_type: u32,
-
-    extra: u32,
-    e_start: u32,
-    e_stride_length: u32,    
-
-    transpose: u32,
-
-    n: u32,
-    m: u32,
-    k: u32
-}
-
-impl MatrixDir{
-    /*
-    new forward: 
-    n: params/weights
-    m: activity
-    w: activity
-    */
-    pub fn null() -> Self{
-        MatrixDir{
-            n_read_start: 0,
-            m_read_start: 0,
-
-            n_stride_length: 0,
-            m_stride_length: 0,
-            
-            w_start: 0,
-            w_stride_length: 0,
-
-            add_const: 0,
-            c_start: 0,
-            c_stride_length: 0,
-            a_func_type: 0,
-
-            extra: 0,
-            e_start: 0,
-            e_stride_length: 0,    
-
-            transpose: 0,
-
-            n: 0,
-            m: 0,
-            k: 0,
-        }
-    }
-
-    pub fn new_forward(nn_info: &NeuralNetworkInfo, dir_i: usize) -> Self{
-        let ping_switch = dir_i % 2;
-        let pong_switch = (dir_i + 1) % 2;
-
-        return MatrixDir{
-            n_read_start: nn_info.layer_info[dir_i].offset as u32,
-            m_read_start: nn_info.activity_info.a_swap_buffer_size as u32 * ping_switch as u32,
-
-            n_stride_length: (nn_info.layer_dim[dir_i] + 1) as u32,
-            m_stride_length: nn_info.activity_info.a_length as u32,
-
-            w_start: nn_info.activity_info.a_swap_buffer_size as u32 * pong_switch as u32,
-            w_stride_length: nn_info.activity_info.a_length as u32,
-
-            add_const: 1,
-            c_start: (nn_info.layer_info[dir_i].offset + nn_info.layer_dim[dir_i])  as u32,
-            c_stride_length: (nn_info.layer_dim[dir_i] + 1) as u32,
-            a_func_type: 1,
-
-            extra: 1,
-            e_start: nn_info.activity_info.s_start as u32 + nn_info.activity_info.a_strides[dir_i + 1] as u32,
-            e_stride_length: nn_info.activity_info.a_length as u32,
-
-            transpose: make_transpose(false, false, false),
-
-            n: nn_info.layer_dim[dir_i + 1] as u32,
-            m: nn_info.n_batches as u32,
-            k: nn_info.layer_dim[dir_i] as u32,
-        }
-    }
-
-    pub fn new_backward_deriv(nn_info: &NeuralNetworkInfo, dir_i: usize) -> Self{
-        let ping_switch = dir_i % 2;
-        let pong_switch = (dir_i + 1) % 2;
-
-        let ping_pong_default = nn_info.activity_info.d_start;
-
-        let n_start: u32;
-        if dir_i >= nn_info.n_layers - 1{
-            return MatrixDir::null();
-        }
-
-
-        return MatrixDir{            
-            n_read_start: nn_info.layer_info[dir_i].offset as u32,
-            m_read_start: (ping_pong_default + nn_info.activity_info.a_deriv_buffer_size * ping_switch) as u32,
-
-            n_stride_length: (nn_info.layer_dim[dir_i] + 1) as u32,
-            m_stride_length: nn_info.activity_info.a_length as u32,
-
-            w_start : (ping_pong_default + nn_info.activity_info.a_deriv_buffer_size * pong_switch) as u32,
-            w_stride_length: nn_info.activity_info.a_length as u32,
-
-            add_const: 0,
-            c_start: 0,
-            c_stride_length: 0,
-            a_func_type: 2,
-
-            extra: 2,
-            e_start: nn_info.activity_info.s_start as u32 + nn_info.activity_info.a_strides[dir_i] as u32,
-            e_stride_length: nn_info.activity_info.a_length as u32,
-
-            transpose: make_transpose(true, false, false),
-
-            n: nn_info.layer_dim[dir_i] as u32,
-            m: nn_info.n_batches as u32,
-            k: nn_info.layer_dim[dir_i + 1] as u32,
-        }
-    }
-
-    pub fn new_backward_gradients(nn_info: &NeuralNetworkInfo, dir_i: usize) -> Self{
-        // have to add 1 to compensate
-        let ping_switch = (dir_i + 1) % 2;
-        let pong_switch = (dir_i + 1 + 1) % 2;
-
-        let ping_pong_default = nn_info.activity_info.d_start;
-
-        return MatrixDir{
-            n_read_start: (ping_pong_default + nn_info.activity_info.a_deriv_buffer_size * pong_switch) as u32,
-            m_read_start: nn_info.activity_info.s_start as u32 + nn_info.activity_info.a_strides[dir_i] as u32,
-
-            n_stride_length: nn_info.activity_info.a_length as u32,
-            m_stride_length: nn_info.activity_info.a_length as u32,
-
-            w_start: nn_info.layer_info[dir_i].offset as u32,
-            w_stride_length: (nn_info.layer_dim[dir_i] + 1) as u32,
-
-            add_const: 0,
-            c_start: 0,
-            c_stride_length: 0,
-            a_func_type: 0,
-
-            extra: 2,
-            e_start: 0,
-            e_stride_length: 0,
-
-            transpose: make_transpose(true, true, true),
-
-            n: nn_info.layer_dim[dir_i + 1] as u32,
-            m: nn_info.layer_dim[dir_i] as u32,
-            k: nn_info.n_batches as u32,
-        }
-    }
-
-    
-    // pub fn new(nn_info : &NeuralNetworkInfo, dir_i: usize) -> Self{
-    //     return MatrixDir{
-    //         act_length: nn_info.activity_info.a_length as u32,
-    //         n_start: nn_info.activity_info.a_strides[dir_i] as u32,
-    //         m_start: nn_info.layer_info[dir_i].offset as u32,
-    //         w_start: nn_info.activity_info.a_strides[dir_i + 1] as u32,
-    //         n: 1,
-    //         m: nn_info.layer_dim[dir_i + 1] as u32,
-    //         k: nn_info.layer_dim[dir_i] as u32,
-            
-    //     }
-    // }
-}
-
-
 pub struct ParamsDir{
     pub layer_dim: Vec<usize>,
     pub n_layers: usize,
@@ -852,4 +457,32 @@ impl ActivityDir{
 
 
 
-// "
+// " 
+/*
+
+Convolution layer
+Params:
+h - height
+w - width
+c - channels
+k - convolution size
+n - filters
+
+
+Idea:
+
+with w, h, c we want to make a process that dispatches 1 thread for each of the values in the hxwxn outputs.
+although we have c channels for the input, each filter only produces a layer of h x w x 1. and since we have n filters,
+our next layer will be w x h x n
+
+so we dispatch w x h x n threads (each for one pixel of the output conv). 
+with these thread there will be a 8 x 8 x 4 thread group (meaning all these threads will read from the same cached buffer)
+This means that we can have a cache buffer size of 8x8x4, which will also slide over the image with t_k. Then the kernals that actually use the values 
+in the cache will read from the cache to update their values.  
+
+
+
+workgroup_dim()
+
+
+*/
