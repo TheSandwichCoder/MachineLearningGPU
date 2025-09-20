@@ -1,4 +1,3 @@
-use bytemuck::{Pod, Zeroable};
 use itertools::Itertools;
 use crate::data_reader::DataReader;
 use rand::Rng;
@@ -174,7 +173,7 @@ impl NeuralNetworkInfo{
     }
 
     pub fn show_all_specs(&self){
-        println!("\nMAIN MODEL:");
+        println!("\nNEURAL NETWORK");
         println!("Layer Dim: {:?}", self.layer_dim);
         println!("N Batches: {:?}", self.n_batches);
         

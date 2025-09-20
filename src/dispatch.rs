@@ -7,6 +7,7 @@ use crate::datatypes::*;
 use crate::data_reader::DataReader;
 use crate::gpu_dirs::nn_dirs::*;
 use crate::datatypes::nn_datatypes::*;
+use crate::functions::*;
 
 struct WorkgroupDim{
     x: usize,
@@ -43,10 +44,6 @@ impl NNPassInfo{
             },
         }
     }
-}
-
-fn ceil_div(x: usize, y: usize) -> usize{
-    return (x + y - 1) / y;
 }
 
 pub struct NNDispatch{
