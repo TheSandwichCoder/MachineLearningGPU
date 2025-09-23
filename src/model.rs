@@ -1,4 +1,4 @@
-use crate::dispatch::NNDispatch;
+use crate::dispatch::{nn_dispatch::*, gpu_instance::*};
 use crate::datatypes::nn_datatypes::*;
 use std::time::{Duration, Instant};
 
@@ -58,15 +58,20 @@ impl ModelConstructor{
 
 pub struct BasicNNModel{
     pub nn_info: NeuralNetworkInfo,
-    pub dispatch: NNDispatch,
+    pub gpu_instance: GPUInstance, 
+    pub nn_dispatch: NNDispatch,
     pub model_info: ModelConstructor,
 }
 
 impl BasicNNModel{
     pub fn construct(constructor: &ModelConstructor) -> Self{
+        let gpu_instance = pollster::block_on(GPUInstance::new());
+        let nn_dispatch = NNDispatch::new(&gpu_instance, &constructor.nn_dim, constructor.n_batches, constructor.data_path.clone(), constructor.n_data_per_batch, constructor.lr, constructor.mr);
+
         return BasicNNModel{
             nn_info: NeuralNetworkInfo::new(&constructor.nn_dim, constructor.n_batches as usize, constructor.lr, constructor.mr),
-            dispatch: pollster::block_on(NNDispatch::new(&constructor.nn_dim, constructor.n_batches, constructor.data_path.clone(), constructor.n_data_per_batch, constructor.lr, constructor.mr)),
+            gpu_instance: gpu_instance,
+            nn_dispatch: nn_dispatch,
             model_info: constructor.clone(),
         }
     }
@@ -76,32 +81,32 @@ impl BasicNNModel{
     }
 
     pub fn show_params(&mut self){
-        self.dispatch.read_back_params();
+        self.nn_dispatch.read_back_params(&self.gpu_instance);
     }
 
     pub fn save(&self){
-        self.dispatch.read_back_save();
+        self.nn_dispatch.read_back_save(&self.gpu_instance);
     }
 
     pub fn debug(&mut self){
         // self.dispatch.data_reader.load_batch_testing();
         // self.dispatch.data_reader.load_batch_mnist();
-        self.dispatch.data_reader.load_batch_debug();
+        self.nn_dispatch.data_reader.load_batch_debug();
 
-        self.dispatch.set_data();
+        self.nn_dispatch.set_data(&self.gpu_instance);
         
-        self.dispatch.forward_mat();
+        self.nn_dispatch.forward_mat(&self.gpu_instance);
 
-        self.dispatch.apply_error();
+        self.nn_dispatch.apply_error(&self.gpu_instance);
 
-        self.dispatch.backward_mat();
+        self.nn_dispatch.backward_mat(&self.gpu_instance);
 
-        self.dispatch.read_back_act_single();
+        self.nn_dispatch.read_back_act_single(&self.gpu_instance);
 
         println!("");
-        self.dispatch.read_back_gradients();
+        self.nn_dispatch.read_back_gradients(&self.gpu_instance);
         println!("");
-        self.dispatch.read_back_params();
+        self.nn_dispatch.read_back_params(&self.gpu_instance);
 
     }
 
@@ -110,33 +115,33 @@ impl BasicNNModel{
         let mut sub_batch_i = 0;
 
         for epoch_i in 0..self.model_info.n_epochs{
-            self.dispatch.data_reader.reset_counters();
+            self.nn_dispatch.data_reader.reset_counters();
             println!("Epoch {}:", epoch_i);
             let t0 = Instant::now();
 
-            for load_batch_i in 0..self.dispatch.data_reader.n_load_batches{
+            for load_batch_i in 0..self.nn_dispatch.data_reader.n_load_batches{
                 
                 // need to load new batch
                 // self.dispatch.data_reader.load_batch_mnist();
                 
-                for sub_batch_i in 0..self.dispatch.data_reader.n_sub_batches{
-                    self.dispatch.set_data();
+                for sub_batch_i in 0..self.nn_dispatch.data_reader.n_sub_batches{
+                    self.nn_dispatch.set_data(&self.gpu_instance);
                                         
-                    self.dispatch.forward_mat();
+                    self.nn_dispatch.forward_mat(&self.gpu_instance);
                     
-                    self.dispatch.apply_error();
+                    self.nn_dispatch.apply_error(&self.gpu_instance);
                     
-                    self.dispatch.backward_mat();
+                    self.nn_dispatch.backward_mat(&self.gpu_instance);
                     
-                    self.dispatch.update_momentum();
+                    self.nn_dispatch.update_momentum(&self.gpu_instance);
                     
-                    self.dispatch.data_reader.increment_sub_batch();
+                    self.nn_dispatch.data_reader.increment_sub_batch();
                 }
                 
-                self.dispatch.data_reader.increment_load_batch();
+                self.nn_dispatch.data_reader.increment_load_batch();
             }
             
-            self.dispatch.device.poll(wgpu::PollType::Wait).unwrap();
+            self.gpu_instance.device.poll(wgpu::PollType::Wait).unwrap();
             println!("{:?}", t0.elapsed());
         }
     }
@@ -144,32 +149,32 @@ impl BasicNNModel{
     // get this to work with testing data 
     pub fn test(&mut self){
         println!("Testing");
-        self.dispatch.data_reader.reset_counters();
-        self.dispatch.clear_metrics();
+        self.nn_dispatch.data_reader.reset_counters();
+        self.nn_dispatch.clear_metrics(&self.gpu_instance);
         let t0 = Instant::now();
 
-        for load_batch_i in 0..self.dispatch.data_reader.n_load_batches{
+        for load_batch_i in 0..self.nn_dispatch.data_reader.n_load_batches{
             // need to load new batch
             // self.dispatch.data_reader.load_batch_testing();
-            self.dispatch.data_reader.load_batch_mnist();
+            self.nn_dispatch.data_reader.load_batch_mnist();
 
-            for sub_batch_i in 0..self.dispatch.data_reader.n_sub_batches{
-                self.dispatch.set_data();
+            for sub_batch_i in 0..self.nn_dispatch.data_reader.n_sub_batches{
+                self.nn_dispatch.set_data(&self.gpu_instance);
     
-                self.dispatch.forward_mat();
+                self.nn_dispatch.forward_mat(&self.gpu_instance);
     
-                self.dispatch.update_metrics();
+                self.nn_dispatch.update_metrics(&self.gpu_instance);
     
-                self.dispatch.data_reader.increment_sub_batch();
+                self.nn_dispatch.data_reader.increment_sub_batch();
             }
 
-            self.dispatch.data_reader.increment_load_batch();
+            self.nn_dispatch.data_reader.increment_load_batch();
 
         }
-        self.dispatch.device.poll(wgpu::PollType::Wait).unwrap();
+        self.gpu_instance.device.poll(wgpu::PollType::Wait).unwrap();
         println!("{:?}", t0.elapsed());
 
-        self.dispatch.read_back_metrics();
+        self.nn_dispatch.read_back_metrics(&self.gpu_instance);
 
     }
 }

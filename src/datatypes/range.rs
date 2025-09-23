@@ -1,8 +1,8 @@
 
 #[derive(Clone)]
 pub struct KernalRange{
-    start_idx: i32,
-    end_idx: i32,
+    pub start_idx: i32,
+    pub end_idx: i32,
 }
 
 impl KernalRange{

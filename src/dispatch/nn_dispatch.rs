@@ -1,19 +1,16 @@
 use std::num::NonZeroU64;
-use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
+use wgpu::util::DeviceExt;
 use std::fs;
 
 use crate::datatypes::*;
 use crate::data_reader::DataReader;
 use crate::gpu_dirs::nn_dirs::*;
-use crate::datatypes::nn_datatypes::*;
+use crate::datatypes::{nn_datatypes::*, workgroup::*};
 use crate::functions::*;
+use crate::dispatch::gpu_instance::*;
 
-struct WorkgroupDim{
-    x: usize,
-    y: usize,
-    z: usize,
-}
+
 
 pub struct NNPassInfo{
     pub dir_buffer: wgpu::Buffer, // for metas
@@ -47,12 +44,6 @@ impl NNPassInfo{
 }
 
 pub struct NNDispatch{
-    // gpu stuff
-    pub instance: wgpu::Instance,
-    pub adapter: wgpu::Adapter,
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
-
     param_buffer: wgpu::Buffer, // holds the params for the model
     gradient_buffer: wgpu::Buffer, // holds the param gradients
     momentum_buffer: wgpu::Buffer, // holds the param momentum
@@ -63,10 +54,8 @@ pub struct NNDispatch{
 
 
     forward_mat_pass_info: NNPassInfo,
-
     backward_deriv_mat_pass_info: NNPassInfo,
     backward_gradient_mat_pass_info: NNPassInfo,
-
     momentum_pass_info: NNPassInfo,
     error_pass_info: NNPassInfo,
     test_pass_info: NNPassInfo,
@@ -78,29 +67,7 @@ pub struct NNDispatch{
 }
 
 impl NNDispatch{
-    pub async fn new(nn_dim: &Vec<usize>, n_batches: u32, data_path: String, data_per_batch: u32, learning_rate: f32, momentum_rate: f32) -> Self{
-        // GPU stuff
-        let instance = wgpu::Instance::default();
-        let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default())
-        .await.expect("No GPU adapter found");
-
-        let feats = wgpu::Features::PUSH_CONSTANTS;
-        let limits = wgpu::Limits {
-            max_push_constant_size: 32, // or adapter.limits().max_push_constant_size.min(128)
-            ..wgpu::Limits::default()
-        };
-
-        let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("device"),
-            required_features: feats,
-            required_limits: limits,
-            memory_hints: wgpu::MemoryHints::Performance, // or Default::default()
-            trace: wgpu::Trace::Off,                      // <-- not Option
-        })
-        .await.expect("request_device failed");
-
-        let align = device.limits().min_uniform_buffer_offset_alignment as u64;
-
+    pub fn new(gpu_instance: &GPUInstance, nn_dim: &Vec<usize>, n_batches: u32, data_path: String, data_per_batch: u32, learning_rate: f32, momentum_rate: f32) -> Self{
         // ---------------------Neural Network Info---------------------
         let nn_info = NeuralNetworkInfo::new(nn_dim, n_batches as usize, learning_rate, momentum_rate);
 
@@ -116,18 +83,18 @@ impl NNDispatch{
         data_reader.load_batch_mnist();
         
         // ---------------------Buffer Stuff---------------------
-        let param_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+        let param_buffer = gpu_instance.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("params buffer"),
             contents: bytemuck::cast_slice(&p_dir.create_buffer()),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
-        let gradient_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+        let gradient_buffer = gpu_instance.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("gradient buffer"),
             contents: bytemuck::cast_slice(&p_dir.create_buffer_empty()),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
         
-        let momentum_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+        let momentum_buffer = gpu_instance.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("momentum buffer"),
             contents: bytemuck::cast_slice(&p_dir.create_buffer_empty()),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
@@ -136,13 +103,13 @@ impl NNDispatch{
 
 
             
-        let act_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+        let act_buffer = gpu_instance.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("activities buffer"),
             contents: bytemuck::cast_slice(&a_dir.create_buffer()),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
 
-        let out_buffer = device.create_buffer(&wgpu::BufferDescriptor{
+        let out_buffer = gpu_instance.device.create_buffer(&wgpu::BufferDescriptor{
             label: Some("out_buf"),
             size: (p_dir.buffer_size * std::mem::size_of::<f32>()) as u64,
             // size: (2000 * std::mem::size_of::<f32>()) as u64,
@@ -150,13 +117,13 @@ impl NNDispatch{
             mapped_at_creation: false,
         });
 
-        let data_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+        let data_buffer = gpu_instance.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("data buffer"),
             contents: bytemuck::cast_slice(&data_reader.get_buffer()),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
 
-        let metric_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+        let metric_buffer = gpu_instance.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("metric buffer"),
             contents: bytemuck::bytes_of(&test_metrics),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
@@ -170,8 +137,8 @@ impl NNDispatch{
 
 
         // ---------------------Bind Layout---------------------
-        let gemm_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("forward_mat_bind_layout"),
+        let gemm_bind_layout = gpu_instance.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("gemm_bind_layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -206,7 +173,7 @@ impl NNDispatch{
             ],
         });
 
-        let gemm_mat_slot   = ((std::mem::size_of::<MatrixDir>() as u64 + align - 1) / align) * align;
+        let gemm_mat_slot   = ((std::mem::size_of::<MatrixDir>() as u64 + gpu_instance.align - 1) / gpu_instance.align) * gpu_instance.align;
 
         // +--------------------------------------------------------+
         // |                                                        |
@@ -216,7 +183,7 @@ impl NNDispatch{
 
         let forward_mat_dir_buffer_size = gemm_mat_slot * (nn_info.get_n_layers() - 1) as u64;
 
-        let forward_mat_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
+        let forward_mat_dir_buffer = gpu_instance.device.create_buffer(&wgpu::BufferDescriptor{
             label: Some("nn_dir_buf"),
             size: forward_mat_dir_buffer_size,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -232,13 +199,13 @@ impl NNDispatch{
 
 
         // ---------------------Shader Sources---------------------
-        let wgsl_src = include_str!("shaders/gemm_op/gemm_i_io.wgsl");
-        let forward_mat_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+        let wgsl_src = include_str!("../shaders/gemm_op/gemm_i_io.wgsl");
+        let forward_mat_shader = gpu_instance.device.create_shader_module(wgpu::ShaderModuleDescriptor{
             label: Some("forward_gemm_shader"),
             source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
         });
 
-        let forward_mat_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
+        let forward_mat_bind_group = gpu_instance.device.create_bind_group(&wgpu::BindGroupDescriptor{
             label: Some("bg"),
             layout: &gemm_bind_layout,
             entries: &[
@@ -253,18 +220,18 @@ impl NNDispatch{
         for layer_i in 0..nn_info.get_n_layers() - 1{
             let mat_dir = MatrixDir::new_forward(&nn_info, layer_i); 
 
-            queue.write_buffer(&forward_mat_dir_buffer, layer_i as u64 * gemm_mat_slot, bytemuck::bytes_of(&mat_dir));
+            gpu_instance.queue.write_buffer(&forward_mat_dir_buffer, layer_i as u64 * gemm_mat_slot, bytemuck::bytes_of(&mat_dir));
         }
 
         // ---------------------Pipeline Layout---------------------
 
-        let forward_mat_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
+        let forward_mat_pipeline_layout = gpu_instance.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
             label: Some("forward_gemm_pipeline_layout"),
             bind_group_layouts: &[&gemm_bind_layout],
             push_constant_ranges: &[],
         });
 
-        let forward_mat_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        let forward_mat_pipeline = gpu_instance.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("forward_gemm_pipeline"),
             layout: Some(&forward_mat_pipeline_layout),
             module: &forward_mat_shader,
@@ -281,7 +248,7 @@ impl NNDispatch{
         
         let backward_deriv_mat_dir_buffer_size = gemm_mat_slot * (nn_info.get_n_layers() - 1) as u64;
 
-        let backward_deriv_mat_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
+        let backward_deriv_mat_dir_buffer = gpu_instance.device.create_buffer(&wgpu::BufferDescriptor{
             label: Some("nn_dir_buf"),
             size: backward_deriv_mat_dir_buffer_size,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -297,13 +264,13 @@ impl NNDispatch{
 
 
         // ---------------------Shader Sources---------------------
-        let wgsl_src = include_str!("shaders/gemm_op/gemm_i_io.wgsl");
-        let backward_deriv_mat_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+        let wgsl_src = include_str!("../shaders/gemm_op/gemm_i_io.wgsl");
+        let backward_deriv_mat_shader = gpu_instance.device.create_shader_module(wgpu::ShaderModuleDescriptor{
             label: Some("backward_deriv_gemm_shader"),
             source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
         });
 
-        let backward_deriv_mat_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
+        let backward_deriv_mat_bind_group = gpu_instance.device.create_bind_group(&wgpu::BindGroupDescriptor{
             label: Some("bg"),
             layout: &gemm_bind_layout,
             entries: &[
@@ -318,18 +285,18 @@ impl NNDispatch{
         for layer_i in 1..nn_info.get_n_layers(){
             let mat_dir = MatrixDir::new_backward_deriv(&nn_info, layer_i); 
 
-            queue.write_buffer(&backward_deriv_mat_dir_buffer, (layer_i - 1) as u64 * gemm_mat_slot, bytemuck::bytes_of(&mat_dir));
+            gpu_instance.queue.write_buffer(&backward_deriv_mat_dir_buffer, (layer_i - 1) as u64 * gemm_mat_slot, bytemuck::bytes_of(&mat_dir));
         }
 
         // ---------------------Pipeline Layout---------------------
 
-        let backward_deriv_mat_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
+        let backward_deriv_mat_pipeline_layout = gpu_instance.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
             label: Some("backward_deriv_gemm_pipeline_layout"),
             bind_group_layouts: &[&gemm_bind_layout],
             push_constant_ranges: &[],
         });
 
-        let backward_deriv_mat_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        let backward_deriv_mat_pipeline = gpu_instance.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("backward_deriv_gemm_pipeline"),
             layout: Some(&backward_deriv_mat_pipeline_layout),
             module: &backward_deriv_mat_shader,
@@ -346,7 +313,7 @@ impl NNDispatch{
         
         let backward_gradient_mat_dir_buffer_size = gemm_mat_slot * (nn_info.get_n_layers() - 1) as u64;
 
-        let backward_gradient_mat_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
+        let backward_gradient_mat_dir_buffer = gpu_instance.device.create_buffer(&wgpu::BufferDescriptor{
             label: Some("nn_dir_buf"),
             size: backward_gradient_mat_dir_buffer_size,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -362,13 +329,13 @@ impl NNDispatch{
 
 
         // ---------------------Shader Sources---------------------
-        let wgsl_src = include_str!("shaders/gemm_op/gemm_i_o.wgsl");
-        let backward_gradient_mat_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+        let wgsl_src = include_str!("../shaders/gemm_op/gemm_i_o.wgsl");
+        let backward_gradient_mat_shader = gpu_instance.device.create_shader_module(wgpu::ShaderModuleDescriptor{
             label: Some("backward_gradient_mat_gemm_shader"),
             source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
         });
 
-        let backward_gradient_mat_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
+        let backward_gradient_mat_bind_group = gpu_instance.device.create_bind_group(&wgpu::BindGroupDescriptor{
             label: Some("bg"),
             layout: &gemm_bind_layout,
             entries: &[
@@ -383,18 +350,18 @@ impl NNDispatch{
         for layer_i in 0..nn_info.get_n_layers() - 1{
             let mat_dir = MatrixDir::new_backward_gradients(&nn_info, layer_i); 
 
-            queue.write_buffer(&backward_gradient_mat_dir_buffer, layer_i as u64 * gemm_mat_slot, bytemuck::bytes_of(&mat_dir));
+            gpu_instance.queue.write_buffer(&backward_gradient_mat_dir_buffer, layer_i as u64 * gemm_mat_slot, bytemuck::bytes_of(&mat_dir));
         }
 
         // ---------------------Pipeline Layout---------------------
 
-        let backward_gradient_mat_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
+        let backward_gradient_mat_pipeline_layout = gpu_instance.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
             label: Some("backward_gradient_gemm_pipeline_layout"),
             bind_group_layouts: &[&gemm_bind_layout],
             push_constant_ranges: &[],
         });
 
-        let backward_gradient_mat_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        let backward_gradient_mat_pipeline = gpu_instance.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("backward_gradient_gemm_pipeline"),
             layout: Some(&backward_gradient_mat_pipeline_layout),
             module: &backward_gradient_mat_shader,
@@ -409,10 +376,10 @@ impl NNDispatch{
         // |                                                        |
         // +--------------------------------------------------------+
         
-        let momentum_slot   = ((std::mem::size_of::<FlatApplyDir>() as u64 + align - 1) / align) * align;
+        let momentum_slot   = ((std::mem::size_of::<FlatApplyDir>() as u64 + gpu_instance.align - 1) / gpu_instance.align) * gpu_instance.align;
         let momentum_dir_buffer_size = momentum_slot as u64 * nn_info.n_batches as u64;
 
-        let momentum_dir_buffer = device.create_buffer(&wgpu::BufferDescriptor{
+        let momentum_dir_buffer = gpu_instance.device.create_buffer(&wgpu::BufferDescriptor{
             label: Some("momentum_dir_buf"),
             size: momentum_dir_buffer_size,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -427,14 +394,14 @@ impl NNDispatch{
         });
 
         // ---------------------Shader Sources---------------------
-        let wgsl_src = include_str!("shaders/apply_op/apply_momentum.wgsl");
-        let momentum_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+        let wgsl_src = include_str!("../shaders/apply_op/apply_momentum.wgsl");
+        let momentum_shader = gpu_instance.device.create_shader_module(wgpu::ShaderModuleDescriptor{
             label: Some("momentum_shader"),
             source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
         });
 
         // ---------------------Bind Layout---------------------
-        let momentum_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let momentum_bind_layout = gpu_instance.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("momentum_bind_layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
@@ -480,7 +447,7 @@ impl NNDispatch{
             ],
         });
 
-        let momentum_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
+        let momentum_bind_group = gpu_instance.device.create_bind_group(&wgpu::BindGroupDescriptor{
             label: Some("bg"),
             layout: &momentum_bind_layout,
             entries: &[
@@ -496,19 +463,19 @@ impl NNDispatch{
         for batch_i in 0..nn_info.n_batches{
             let momentum_dir = FlatApplyDir::new(&nn_info, batch_i); 
 
-            queue.write_buffer(&momentum_dir_buffer, batch_i as u64 * momentum_slot, bytemuck::bytes_of(&momentum_dir));
+            gpu_instance.queue.write_buffer(&momentum_dir_buffer, batch_i as u64 * momentum_slot, bytemuck::bytes_of(&momentum_dir));
         }
 
 
         // ---------------------Pipeline Layout---------------------
 
-        let momentum_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
+        let momentum_pipeline_layout = gpu_instance.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
             label: Some("momentum_pipeline_layout"),
             bind_group_layouts: &[&momentum_bind_layout],
             push_constant_ranges: &[],
         });
 
-        let momentum_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        let momentum_pipeline = gpu_instance.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("momentum_pipeline"),
             layout: Some(&momentum_pipeline_layout),
             module: &momentum_shader,
@@ -523,12 +490,12 @@ impl NNDispatch{
         // |                                                        |
         // +--------------------------------------------------------+
         
-        let error_slot   = ((std::mem::size_of::<ErrorDir>() as u64 + align - 1) / align) * align;
+        let error_slot   = ((std::mem::size_of::<ErrorDir>() as u64 + gpu_instance.align - 1) / gpu_instance.align) * gpu_instance.align;
         let error_dir_buffer_size = error_slot as u64 * 1;
 
         let error_dir = ErrorDir::new(&nn_info);
 
-        let error_dir_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+        let error_dir_buffer = gpu_instance.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("error_dir_buf"),
             contents: bytemuck::bytes_of(&error_dir),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -536,14 +503,14 @@ impl NNDispatch{
 
 
         // ---------------------Shader Sources---------------------
-        let wgsl_src = include_str!("shaders/apply_op/apply_error.wgsl");
-        let error_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+        let wgsl_src = include_str!("../shaders/apply_op/apply_error.wgsl");
+        let error_shader = gpu_instance.device.create_shader_module(wgpu::ShaderModuleDescriptor{
             label: Some("error_shader"),
             source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
         });
 
         // ---------------------Bind Layout---------------------
-        let error_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let error_bind_layout = gpu_instance.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("error_bind_layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
@@ -579,7 +546,7 @@ impl NNDispatch{
             ],
         });
 
-        let error_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
+        let error_bind_group = gpu_instance.device.create_bind_group(&wgpu::BindGroupDescriptor{
             label: Some("bg"),
             layout: &error_bind_layout,
             entries: &[
@@ -591,7 +558,7 @@ impl NNDispatch{
 
         // ---------------------Pipeline Layout---------------------
 
-        let error_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
+        let error_pipeline_layout = gpu_instance.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
             label: Some("error_pipeline_layout"),
             bind_group_layouts: &[&error_bind_layout],
             push_constant_ranges: &[wgpu::PushConstantRange{
@@ -600,7 +567,7 @@ impl NNDispatch{
             }],
         });
 
-        let error_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        let error_pipeline = gpu_instance.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("error_pipeline"),
             layout: Some(&error_pipeline_layout),
             module: &error_shader,
@@ -616,14 +583,14 @@ impl NNDispatch{
         // +--------------------------------------------------------+
         
         // ---------------------Shader Sources---------------------
-        let wgsl_src = include_str!("shaders/test_model.wgsl");
-        let test_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+        let wgsl_src = include_str!("../shaders/test_model.wgsl");
+        let test_shader = gpu_instance.device.create_shader_module(wgpu::ShaderModuleDescriptor{
             label: Some("test_shader"),
             source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
         });
 
         // ---------------------Bind Layout---------------------
-        let test_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let test_bind_layout = gpu_instance.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("test_bind_layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
@@ -669,7 +636,7 @@ impl NNDispatch{
             ],
         });
 
-        let test_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
+        let test_bind_group = gpu_instance.device.create_bind_group(&wgpu::BindGroupDescriptor{
             label: Some("bg"),
             layout: &test_bind_layout,
             entries: &[
@@ -682,7 +649,7 @@ impl NNDispatch{
 
         // ---------------------Pipeline Layout---------------------
 
-        let test_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
+        let test_pipeline_layout = gpu_instance.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
             label: Some("test_pipeline_layout"),
             bind_group_layouts: &[&test_bind_layout],
             push_constant_ranges: &[wgpu::PushConstantRange{
@@ -691,7 +658,7 @@ impl NNDispatch{
             }],
         });
 
-        let test_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        let test_pipeline = gpu_instance.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("test_pipeline"),
             layout: Some(&test_pipeline_layout),
             module: &test_shader,
@@ -718,11 +685,6 @@ impl NNDispatch{
         println!("SUCCESSFULLY INITIALISED GPU");
 
         return NNDispatch{
-            instance,
-            adapter,
-            device,
-            queue,
-
             param_buffer,
             gradient_buffer,
             momentum_buffer,
@@ -743,8 +705,8 @@ impl NNDispatch{
         }
     }
 
-    pub fn forward_mat(&self){
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
+    pub fn forward_mat(&self, gpu_instance: &GPUInstance){
+        let mut encoder = gpu_instance.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
 
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -766,12 +728,12 @@ impl NNDispatch{
         }
 
         let forward_commands = encoder.finish();
-        self.queue.submit([forward_commands]);  
-        // self.device.poll(wgpu::PollType::Wait).unwrap();
+        gpu_instance.queue.submit([forward_commands]);  
+        // self.gpu_instance.device.poll(wgpu::PollType::Wait).unwrap();
     }
 
-    pub fn backward_mat(&self){
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
+    pub fn backward_mat(&self, gpu_instance: &GPUInstance){
+        let mut encoder = gpu_instance.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
 
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -806,11 +768,11 @@ impl NNDispatch{
         }
 
         let backward_commands = encoder.finish();
-        self.queue.submit([backward_commands]); 
+        gpu_instance.queue.submit([backward_commands]); 
     }
 
-    pub fn set_data(&self){
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
+    pub fn set_data(&self, gpu_instance: &GPUInstance){
+        let mut encoder = gpu_instance.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
 
         let data_slot = (self.data_reader.data_value_size + 1);
         // let curr_batch_start = self.data_reader.load_batch_i * self.data_reader.load_batch_length * data_slot  + self.data_reader.sub_batch_i * self.data_reader.sub_batch_length * data_slot;
@@ -839,11 +801,11 @@ impl NNDispatch{
             );
         }
 
-        self.queue.submit([encoder.finish()]);
+        gpu_instance.queue.submit([encoder.finish()]);
     }
 
-    pub fn update_momentum(&self){
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
+    pub fn update_momentum(&self, gpu_instance: &GPUInstance){
+        let mut encoder = gpu_instance.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
 
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -864,11 +826,11 @@ impl NNDispatch{
         }
 
         let momentum_commands = encoder.finish();
-        self.queue.submit([momentum_commands]); 
+        gpu_instance.queue.submit([momentum_commands]); 
     }
 
-    pub fn apply_error(&self){
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
+    pub fn apply_error(&self, gpu_instance: &GPUInstance){
+        let mut encoder = gpu_instance.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
 
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -892,20 +854,20 @@ impl NNDispatch{
         }
 
         let error_commands = encoder.finish();
-        self.queue.submit([error_commands]); 
+        gpu_instance.queue.submit([error_commands]); 
     }
 
-    pub fn clear_metrics(&self){
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
+    pub fn clear_metrics(&self, gpu_instance: &GPUInstance){
+        let mut encoder = gpu_instance.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
         
         encoder.clear_buffer(&self.metric_buffer, 0, Some(16));
 
         let error_commands = encoder.finish();
-        self.queue.submit([error_commands]); 
+        gpu_instance.queue.submit([error_commands]); 
     }
 
-    pub fn update_metrics(&self){
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
+    pub fn update_metrics(&self, gpu_instance: &GPUInstance){
+        let mut encoder = gpu_instance.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder")});
         
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -927,19 +889,19 @@ impl NNDispatch{
         }
 
         let error_commands = encoder.finish();
-        self.queue.submit([error_commands]); 
+        gpu_instance.queue.submit([error_commands]); 
     }
 
-    pub fn read_back_params(&self){
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
+    pub fn read_back_params(&self, gpu_instance: &GPUInstance){
+        let mut encoder = gpu_instance.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
         
         encoder.copy_buffer_to_buffer(&self.param_buffer, 0, &self.out_buffer, 0, self.nn_info.p_length as u64 *4);
 
-        self.queue.submit(Some(encoder.finish()));
+        gpu_instance.queue.submit(Some(encoder.finish()));
 
         let slice = self.out_buffer.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| ());
-        self.device.poll(wgpu::PollType::Wait).unwrap();
+        gpu_instance.device.poll(wgpu::PollType::Wait).unwrap();
 
         // Now it's safe to read.
         let data = slice.get_mapped_range();
@@ -951,16 +913,16 @@ impl NNDispatch{
         self.out_buffer.unmap();
     }
 
-    pub fn read_back_save(&self){
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
+    pub fn read_back_save(&self, gpu_instance: &GPUInstance){
+        let mut encoder = gpu_instance.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
         
         encoder.copy_buffer_to_buffer(&self.param_buffer, 0, &self.out_buffer, 0, self.nn_info.p_length as u64 *4);
 
-        self.queue.submit(Some(encoder.finish()));
+        gpu_instance.queue.submit(Some(encoder.finish()));
 
         let slice = self.out_buffer.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| ());
-        self.device.poll(wgpu::PollType::Wait).unwrap();
+        gpu_instance.device.poll(wgpu::PollType::Wait).unwrap();
 
         // Now it's safe to read.
         let data = slice.get_mapped_range();
@@ -976,16 +938,16 @@ impl NNDispatch{
         self.out_buffer.unmap();
     }
 
-    pub fn read_back_metrics(&self){
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
+    pub fn read_back_metrics(&self, gpu_instance: &GPUInstance){
+        let mut encoder = gpu_instance.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
         
         encoder.copy_buffer_to_buffer(&self.metric_buffer, 0, &self.out_buffer, 0, 2 as u64 *4);
 
-        self.queue.submit(Some(encoder.finish()));
+        gpu_instance.queue.submit(Some(encoder.finish()));
 
         let slice = self.out_buffer.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| ());
-        self.device.poll(wgpu::PollType::Wait).unwrap();
+        gpu_instance.device.poll(wgpu::PollType::Wait).unwrap();
 
         // Now it's safe to read.
         let data = slice.get_mapped_range();
@@ -997,16 +959,16 @@ impl NNDispatch{
         self.out_buffer.unmap();
     }
 
-    pub fn read_back_data(&self){
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
+    pub fn read_back_data(&self, gpu_instance: &GPUInstance){
+        let mut encoder = gpu_instance.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
         
         encoder.copy_buffer_to_buffer(&self.data_buffer, 0, &self.out_buffer, 0, 1024);
 
-        self.queue.submit(Some(encoder.finish()));
+        gpu_instance.queue.submit(Some(encoder.finish()));
 
         let slice = self.out_buffer.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| ());
-        self.device.poll(wgpu::PollType::Wait).unwrap();
+        gpu_instance.device.poll(wgpu::PollType::Wait).unwrap();
 
         // Now it's safe to read.
         let data = slice.get_mapped_range();
@@ -1017,16 +979,16 @@ impl NNDispatch{
         self.out_buffer.unmap();
     }
 
-    pub fn read_back_act_single(&self){
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
+    pub fn read_back_act_single(&self, gpu_instance: &GPUInstance){
+        let mut encoder = gpu_instance.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
         
         encoder.copy_buffer_to_buffer(&self.act_buffer, 0, &self.out_buffer, 0, self.nn_info.activity_info.a_length as u64 *4);
 
-        self.queue.submit(Some(encoder.finish()));
+        gpu_instance.queue.submit(Some(encoder.finish()));
 
         let slice = self.out_buffer.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| ());
-        self.device.poll(wgpu::PollType::Wait).unwrap();
+        gpu_instance.device.poll(wgpu::PollType::Wait).unwrap();
 
         // Now it's safe to read.
         let data = slice.get_mapped_range();
@@ -1040,16 +1002,16 @@ impl NNDispatch{
         self.out_buffer.unmap();
     }
 
-    pub fn read_back_gradients(&self){
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
+    pub fn read_back_gradients(&self, gpu_instance: &GPUInstance){
+        let mut encoder = gpu_instance.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
         
         encoder.copy_buffer_to_buffer(&self.gradient_buffer, 0, &self.out_buffer, 0, self.nn_info.p_length as u64 *4);
 
-        self.queue.submit(Some(encoder.finish()));
+        gpu_instance.queue.submit(Some(encoder.finish()));
 
         let slice = self.out_buffer.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| ());
-        self.device.poll(wgpu::PollType::Wait).unwrap();
+        gpu_instance.device.poll(wgpu::PollType::Wait).unwrap();
 
         // Now it's safe to read.
         let data = slice.get_mapped_range();
@@ -1061,16 +1023,16 @@ impl NNDispatch{
         self.out_buffer.unmap()
     }
 
-    pub fn read_back_raw(&self, n_floats: u64){
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
+    pub fn read_back_raw(&self, gpu_instance: &GPUInstance, n_floats: u64){
+        let mut encoder = gpu_instance.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
         
         encoder.copy_buffer_to_buffer(&self.act_buffer, 0, &self.out_buffer, 0, n_floats*4);
 
-        self.queue.submit(Some(encoder.finish()));
+        gpu_instance.queue.submit(Some(encoder.finish()));
 
         let slice = self.out_buffer.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| ());
-        self.device.poll(wgpu::PollType::Wait).unwrap();
+        gpu_instance.device.poll(wgpu::PollType::Wait).unwrap();
 
         // Now it's safe to read.
         let data = slice.get_mapped_range();

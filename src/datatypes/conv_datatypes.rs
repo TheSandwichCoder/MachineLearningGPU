@@ -1,3 +1,5 @@
+use rand::Rng;
+
 use crate::tensor::*;
 use crate::range::*;
 use crate::functions::*;
@@ -26,6 +28,7 @@ Pool Dim:
 
 */
 
+// CONSTRUCTOR
 #[derive(Clone)]
 pub struct ConvolutionConstructor{
     pub i_x: usize,
@@ -82,11 +85,12 @@ impl ConvolutionConstructor{
 #[derive(Clone)]
 pub struct ConvolutionInfo{
     pub conv_layers: Vec<ConvLayerInfo>,
+    pub param_info: ConvParamInfo,
+    pub activity_info: ConvActivityInfo,
     pub input_layer_dim: Vec<usize>,
     pub output_layer_dim: Vec<usize>,
     pub n_layers: usize,
     pub n_batches: usize,
-    pub size: usize,
 }
 
 impl ConvolutionInfo{
@@ -100,8 +104,6 @@ impl ConvolutionInfo{
         let mut output_layer_x = 0;
         let mut output_layer_y = 0;
         let mut output_layer_c = 0;
-
-        let mut size = 0;
 
         for layer_i in 0..constructor.n_layers{
             let pool_k: usize;
@@ -132,7 +134,6 @@ impl ConvolutionInfo{
 
             
             let layer_info = ConvLayerInfo::new(vec![prev_x, prev_y, prev_c], vec![kernal_k, kernal_k, prev_c], output_n, pool_k);
-            size += layer_info.size;
             
             prev_x = temp_x;
             prev_y = temp_y;
@@ -141,13 +142,17 @@ impl ConvolutionInfo{
             conv_layers.push(layer_info);
         }
 
+        let activity_info = ConvActivityInfo::new(&conv_layers);
+        let param_info = ConvParamInfo::new(&conv_layers);
+
         return ConvolutionInfo{
             conv_layers: conv_layers,
+            activity_info: activity_info,
+            param_info: param_info,
             input_layer_dim: vec![constructor.i_x, constructor.i_y, constructor.i_c],
             output_layer_dim: vec![output_layer_x, output_layer_y, output_layer_c],
             n_layers: constructor.n_layers,
             n_batches: constructor.n_batches,
-            size: size,
         }
     }
 
@@ -162,20 +167,32 @@ impl ConvolutionInfo{
         
         println!("Convolutional layer Dim");
         for conv_layer_i in 0..self.n_layers{
-            println!("- {:?}", self.conv_layers[conv_layer_i].layer_dim);
+            println!("- {:?} {} floats", self.conv_layers[conv_layer_i].layer_dim, get_vec_product(&self.conv_layers[conv_layer_i].layer_dim));
         }
 
         println!("Kernals");
 
         for kernal_layer_i in 0..self.n_layers - 1{
             
-            println!("- {} {:?} {:?}", self.conv_layers[kernal_layer_i].n_kernals ,self.conv_layers[kernal_layer_i].kernal_info.dim);
+            println!("- {} {:?}", self.conv_layers[kernal_layer_i].n_kernals ,self.conv_layers[kernal_layer_i].kernal_info.dim);
         }
+        
+        println!("\nACTIVITY INFO");
+        println!("Activity Strides: {:?}", self.activity_info.strides);
+        println!("Ping Pong Buffer length: {} floats", self.activity_info.deriv_buffer_size);
+        println!("Total Buffer Length: {} floats", self.activity_info.size);
+
+        println!("\nPARAM INFO");
+        
+        println!("Param Kernal Strides: {:?}", self.param_info.k_strides);
+        println!("Param Bias Strides: {:?}", self.param_info.b_strides);
+        println!("Total Buffer Length: {} floats", self.param_info.size);
 
 
     }
 }
 
+// LAYER INFO
 #[derive (Clone)]
 pub struct ConvLayerInfo{
     pub layer_dim: Vec<usize>,
@@ -183,8 +200,6 @@ pub struct ConvLayerInfo{
     pub n_kernals: usize,
     pub kernal_info: KernalInfo,
     pub pooling: PoolingInfo,
-
-    pub size: usize,
 }
 
 impl ConvLayerInfo{
@@ -194,8 +209,6 @@ impl ConvLayerInfo{
 
         let mut kernal_info = KernalInfo::new(kernal_dim);
 
-        size += kernal_info.size * n_kernals;
-
         let pooling_info = PoolingInfo::new(&layer_dim, pool_size);
 
         return ConvLayerInfo{
@@ -204,12 +217,11 @@ impl ConvLayerInfo{
             n_kernals: n_kernals,
             kernal_info: kernal_info,
             pooling: pooling_info,
-
-            size: size,
         }
     }
 }
 
+// POOLING INFO
 #[derive (Clone)]
 pub struct PoolingInfo{
     pub dim: Vec<usize>,
@@ -225,12 +237,13 @@ impl PoolingInfo{
     }
 }
 
-
+// KERNAL INFO
 #[derive (Clone)]
 pub struct KernalInfo{
     pub dim: Vec<usize>,
     pub tens: TensorInfo,
-    pub range: KernalRange,
+    pub k_range: KernalRange,
+    pub c_range: KernalRange,
     pub size: usize,
 }
 
@@ -240,18 +253,195 @@ impl KernalInfo{
         reversed.reverse();
 
         let k = kernal_dim[0];
+        let c = kernal_dim[2];
 
-        let range = KernalRange::new(-(floor_div(k, 2) as i32), ceil_div(k, 2) as i32);
+        let k_range = KernalRange::new(-(floor_div(k, 2) as i32), ceil_div(k, 2) as i32);
+        let c_range = KernalRange::new(-(floor_div(c, 2) as i32), ceil_div(c, 2) as i32);
 
         let tens = TensorInfo::new(&reversed);
-        let size = tens.offset;
+        let size = tens.tens_length;
 
         return KernalInfo{
             dim: kernal_dim,
             tens: tens,
-            range: range,
+            k_range: k_range,
+            c_range: c_range,
             size: size,
         }
     }
 }
 
+
+// ACTIVITY INFO
+/*
+Swap Buffer
+Storage Buffer (preactivation values)
+Deriv Buffer
+*/
+
+#[derive (Clone)]
+pub struct ConvActivityInfo{
+    pub offset: usize,
+    
+    pub dim: Vec<TensorInfo>, 
+    pub strides: Vec<usize>,
+
+    pub swap_buffer_size: usize,
+    pub deriv_buffer_size: usize,
+
+    pub size: usize,
+
+    pub s_start: usize, // pre activation storage
+    pub d_start: usize, // derivative ping pong
+}
+
+impl ConvActivityInfo{
+    pub fn new(layer_info: &Vec<ConvLayerInfo>) -> Self{
+        let largest_layer = get_layer_max(layer_info);
+
+        let mut t_length = 0;
+        let mut layer_dim = Vec::new();
+        
+        // swap buffer
+        t_length += largest_layer * 2;
+        
+        // storage buffer
+        let s_start = t_length;
+
+        let mut stride_offset = 0;
+        let mut strides = Vec::new();
+
+        for layer in layer_info{
+            let mut reversed = layer.layer_dim.clone();
+            reversed.reverse(); 
+            let tens_info = TensorInfo::new(&reversed);
+            stride_offset += tens_info.tens_length;
+            
+            strides.push(stride_offset);
+            layer_dim.push(tens_info);
+        }
+
+        t_length += stride_offset;
+
+        // derivative buffer
+        let d_start = t_length;
+
+        t_length += largest_layer * 2;
+
+        return ConvActivityInfo{
+            offset: 0,
+            dim: layer_dim,
+            strides: strides,
+            swap_buffer_size: largest_layer,
+            deriv_buffer_size: largest_layer,
+
+            size: t_length,
+
+            s_start: s_start,
+            d_start: d_start,
+        }
+    }
+
+    pub fn create_buffer(&self) -> Vec<f32>{
+        return vec![1.0; self.size];
+    }
+}
+
+// PARAMETERS INFO
+/*
+Storage Buffer (Parameters)
+*/
+#[derive (Clone)]
+pub struct ConvParamInfo{
+    pub dim: Vec<TensorInfo>,
+    pub kernal_count: Vec<usize>,
+
+    pub k_strides: Vec<usize>, // kernal strides
+    pub b_strides: Vec<usize>, // bias strides
+
+    pub b_offset: usize,
+
+    pub size: usize,
+}
+
+impl ConvParamInfo{
+    pub fn new(layer_info: &Vec<ConvLayerInfo>) -> Self{
+        let mut layer_dim = Vec::new();
+        let mut kernal_count = Vec::new();
+
+        let mut t_size = 0;
+        let mut b_offset = 0;
+
+        let mut k_stride_offset = 0;
+        let mut b_stride_offset = 0;
+
+        let mut k_strides = Vec::new();
+        let mut b_strides = Vec::new();
+
+        for layer in layer_info{
+            let tens_info = layer.kernal_info.tens.clone();
+
+            k_strides.push(k_stride_offset);
+            b_strides.push(b_stride_offset);
+            kernal_count.push(layer.n_kernals);
+            
+            k_stride_offset += tens_info.tens_length * layer.n_kernals;
+            b_stride_offset += layer.n_kernals;
+            layer_dim.push(tens_info);
+        }
+
+        t_size += k_stride_offset;
+        b_offset = t_size;
+
+        t_size += b_stride_offset;
+
+        return ConvParamInfo{
+            dim: layer_dim,
+            kernal_count: kernal_count,
+            k_strides: k_strides,
+            b_strides: b_strides,
+
+            b_offset: b_offset,
+
+            size: t_size,
+        }
+    }
+
+    pub fn create_buffer(&self) -> Vec<f32>{
+        let mut rng = rand::thread_rng();
+
+        let random_floats: Vec<f32> = (0..self.size)
+            .map(|_| rng.gen_range(-1.0..=1.0))
+            .collect();
+    
+
+        return random_floats;
+    }
+
+    pub fn create_buffer_empty(&self) -> Vec<f32>{
+        return vec![0.0; self.size];
+    }
+}
+
+fn get_vec_product(vec: &Vec<usize>) -> usize{
+    let mut val = 1;
+    
+    
+    for v in vec{
+        val *= v;
+    } 
+    
+    return val;
+}
+
+pub fn get_layer_max(layer_info: &Vec<ConvLayerInfo>) -> usize{
+    let mut greatest_size = 0;
+    for layer in layer_info{
+        let layer_size = get_vec_product(&layer.layer_dim);
+        
+        if layer_size > greatest_size{
+            greatest_size = layer_size;
+        }
+    } 
+    return greatest_size;
+}

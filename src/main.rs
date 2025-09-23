@@ -11,7 +11,7 @@ mod functions;
 mod datatypes;
 
 use crate::datatypes::*;
-use crate::dispatch::*;
+use crate::dispatch::{conv_dispatch::*, gpu_instance::GPUInstance};
 use crate::model::*;
 
 use crate::conv_datatypes::*;
@@ -28,10 +28,15 @@ fn main() {
     conv_construct.set_outputs(vec![10, 1]);
     conv_construct.set_n_batches(1);
 
-    let conv_info = ConvolutionInfo::construct(conv_construct);
-    
-    conv_info.show_all_specs();
+    // let conv_info = ConvolutionInfo::construct(conv_construct);
 
+    let gpu_instance = pollster::block_on(GPUInstance::new());
+    let mut conv_dispatch = ConvDispatch::new(&gpu_instance, conv_construct, 1);
+
+    conv_dispatch.conv_info.show_all_specs();
+    
+    conv_dispatch.forward_conv_mat(&gpu_instance);
+    conv_dispatch.read_back_act_single(&gpu_instance);
     // constructor.set_nn_dim(&vec![2, 17, 2]);
     // constructor.set_lr(1.0);
     // constructor.load_all_data(10000);
@@ -49,8 +54,8 @@ fn main() {
     // nn_model.show_all_specs();
 
     
-    // // nn_model.debug();
-    // // nn_model.test();
+    // nn_model.debug();
+    // nn_model.test();
     
     // // nn_model.show_params();
     // nn_model.train();

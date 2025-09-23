@@ -74,7 +74,7 @@ fn get_vec_max(vec: &Vec<usize>) -> usize{
 // 5. deriv ping pong buffer 2 (array)
 
 #[derive(Clone)]
-pub struct ActivityInfo{
+pub struct NNActivityInfo{
     pub offset: usize,
     pub a_dim: Vec<usize>,
     pub a_strides: Vec<usize>,
@@ -87,9 +87,9 @@ pub struct ActivityInfo{
     pub d_start: usize,
 }
 
-impl ActivityInfo{
+impl NNActivityInfo{
     pub fn null() -> Self{
-        return ActivityInfo{
+        return NNActivityInfo{
             offset: 0,
             a_dim: Vec::new(),
             a_strides: Vec::new(),
@@ -119,7 +119,7 @@ impl ActivityInfo{
 
         t_length += largest_layer * 2;
 
-        return ActivityInfo{
+        return NNActivityInfo{
             offset: 0,
             a_dim: a_dim.clone(),
             a_strides: a_strides.clone(),
@@ -148,7 +148,7 @@ impl ActivityInfo{
 pub struct NeuralNetworkInfo{
     pub layer_dim: Vec<usize>,
     pub n_layers: usize,
-    pub activity_info: ActivityInfo,
+    pub activity_info: NNActivityInfo,
     pub layer_info: Vec<TensorInfo>,
     pub nn_length: usize,
     pub p_length: usize,
@@ -162,7 +162,7 @@ impl NeuralNetworkInfo{
         return NeuralNetworkInfo{
             layer_dim: Vec::new(),
             n_layers: 0,
-            activity_info: ActivityInfo::null(),
+            activity_info: NNActivityInfo::null(),
             layer_info: Vec::new(),
             nn_length: 0,
             p_length: 0,
@@ -220,7 +220,7 @@ impl NeuralNetworkInfo{
         let mut p_length = 0;
 
         // make activity layers
-        let activity_info = ActivityInfo::new(nn_dim);
+        let activity_info = NNActivityInfo::new(nn_dim);
 
         // make info layers
         let mut layer_info = Vec::new();
@@ -363,7 +363,7 @@ pub struct ActivityDir{
     n_layers: usize,
     n_batches: usize,
 
-    activities_info: Vec<ActivityInfo>,
+    activities_info: Vec<NNActivityInfo>,
     buffer_size: usize,
     single_buffer_size: usize,
 }
