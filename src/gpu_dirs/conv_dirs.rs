@@ -24,13 +24,13 @@ pub struct Im2ColDir{
     layer_read_start: u32,
     write_start: u32,
 
-    pub c_start: u32,
+    c_start: u32,
 
     transpose: u32,
 
     n: u32,
     m: u32,
-    pub k: u32
+    k: u32
 }
 
 impl Im2ColDir{
@@ -50,7 +50,7 @@ impl Im2ColDir{
             transpose: 0,
 
             n: conv_layer.n_kernals as u32,
-            m: conv_info.param_info.dim[dir_i].tens_length as u32,
+            m: conv_info.activity_info.dim[dir_i].tens_length as u32,
             k: conv_layer.kernal_info.size as u32,
             
         }

@@ -84,6 +84,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
             }
             else{
                 b_sub[t_n][t_m] = read_buffer2[mat_dir.layer_read_start + u32(read_idx)];
+                // b_sub[t_n][t_m] = f32(read_pos.y);
             }
         }    
         
@@ -96,8 +97,15 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
             for (var i: u32 = 0; i < limit; i++) {
                 // v += a_sub[t_n][i];
                 v += a_sub[t_n][i] * b_sub[i][t_m];
+                // v = f32(rel_kernal_pos.y * 28 + rel_kernal_pos.x);
+                // v = b_sub[i][t_m];
+
+                // if b_sub[i][t_m] != 0.0{
+                //     v += 1.0;
+                // }
             }
         }
+        
 
         // v += 1.0;
 
@@ -108,9 +116,9 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
 
 
     if !is_dead{
-        v += read_buffer1[mat_dir.c_start + g_n];
+        // v += read_buffer1[mat_dir.c_start + g_n];
 
-        v = ReLu(v);
+        // v = ReLu(v);
 
         let write_idx = g_n * mat_dir.m + g_m;
 
@@ -136,7 +144,7 @@ fn flatten_safe(v: vec3i, k: vec3i) -> i32{
         return -1;
     }
 
-    let val = v.z * k.x * k.y + v.y + k.y + v.x;
+    let val = v.z * k.x * k.y + v.y * k.x + v.x;
     
     return val;
 }

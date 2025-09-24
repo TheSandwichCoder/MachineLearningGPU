@@ -176,7 +176,7 @@ impl ConvDispatch{
         for layer_i in 0..conv_info.n_layers - 1{            
             let mat_dir = Im2ColDir::new(&conv_info, layer_i);
 
-            println!("{}", mat_dir.k);
+            // println!("{}", mat_dir.n);
 
             gpu_instance.queue.write_buffer(&forward_mat_dir_buffer, layer_i as u64 * gemm_mat_slot, bytemuck::bytes_of(&mat_dir));
         }
@@ -232,7 +232,7 @@ impl ConvDispatch{
             pass.set_bind_group(0, &self.forward_mat_pass_info.bind_group, &[dyn_off]);
 
             let gx = ceil_div(self.conv_info.conv_layers[layer_i].n_kernals, self.forward_mat_pass_info.workgroup_dim.x);
-            let gy = ceil_div(self.conv_info.param_info.dim[layer_i].tens_length, self.forward_mat_pass_info.workgroup_dim.y);
+            let gy = ceil_div(self.conv_info.activity_info.dim[layer_i].tens_length, self.forward_mat_pass_info.workgroup_dim.y);
 
             pass.dispatch_workgroups(gx as u32, gy as u32, 1);
         }
@@ -264,7 +264,17 @@ impl ConvDispatch{
         let data = slice.get_mapped_range();
         let out: &[f32] = bytemuck::cast_slice(&data);
 
-        println!("activity buffer: {:?}", &out[1960..3920]);
+        
+        let mut prev_idx = 1960;
+        let mut curr_idx = 1960 + 28;
+        
+        while curr_idx <= 3920{
+            println!("{} activity buffer: {:?}", (((prev_idx - 1960) / 28 )% 28), &out[prev_idx..curr_idx]);
+            prev_idx += 28;
+            curr_idx += 28;
+        }
+
+
         drop(data);
         self.out_buffer.unmap();
     }

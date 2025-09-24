@@ -343,6 +343,16 @@ impl ConvActivityInfo{
     }
 
     pub fn create_buffer(&self) -> Vec<f32>{
+        let mut empty = vec![0.0; self.size];
+
+        for i in 0..self.size{
+            empty[i] = i as f32;
+        }
+
+        // println!("{:?}", &empty[0..784]);
+
+        return empty;
+
         return vec![1.0; self.size];
     }
 }
@@ -408,6 +418,14 @@ impl ConvParamInfo{
     }
 
     pub fn create_buffer(&self) -> Vec<f32>{
+        let mut empty_vec = vec![1.0; self.size];
+
+        for i in 0..self.size{
+            empty_vec[i] = (i as f32 - 32.0) / 64.0;
+        }
+
+        return empty_vec;
+
         let mut rng = rand::thread_rng();
 
         let random_floats: Vec<f32> = (0..self.size)
