@@ -11,6 +11,7 @@ struct MatrixDir{
 
     // transpose: u32,
     n_outputs: u32, // number of outputs for a single batch
+    batch_swap_buffer_size: u32, // size of the swap buffer for a single input
 
     n: u32,
     m: u32,
@@ -51,6 +52,8 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
     let batch_g_m = g_m % mat_dir.n_outputs;
     let batch_i = g_m / mat_dir.n_outputs;
 
+    let batch_buffer_offset = u32(batch_i * mat_dir.batch_swap_buffer_size);
+
     var v = 0.0;
 
 
@@ -87,7 +90,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
                 b_sub[t_n][t_m] = 0.0;
             }
             else{
-                b_sub[t_n][t_m] = read_buffer2[mat_dir.layer_read_start + u32(read_idx)];
+                b_sub[t_n][t_m] = read_buffer2[mat_dir.layer_read_start + u32(read_idx) + batch_buffer_offset];
             }
         }    
         
@@ -109,13 +112,13 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
 
 
     if !is_dead{
-        v += read_buffer1[mat_dir.c_start + g_n];
+        // v += read_buffer1[mat_dir.c_start + g_n];
 
-        v = ReLu(v);
+        // v = ReLu(v);
 
-        let write_idx = g_n * mat_dir.n_outputs + batch_g_m + batch_i * mat_dir.n_outputs * mat_dir.n;
+        let write_idx = g_n * mat_dir.n_outputs + batch_g_m;
 
-        read_buffer2[mat_dir.write_start + u32(write_idx)] = v;
+        read_buffer2[mat_dir.write_start + u32(write_idx) + batch_buffer_offset] = v;
     }
 }
 

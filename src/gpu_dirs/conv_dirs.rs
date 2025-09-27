@@ -27,10 +27,15 @@ pub struct Im2ColDir{
     c_start: u32,
 
     n_outputs: u32,
+    batch_swap_buffer_size: u32,
 
     n: u32,
     m: u32,
-    k: u32
+    k: u32,
+
+    _pad1: u32,
+    _pad2: u32,
+    _pad3: u32,
 }
 
 impl Im2ColDir{
@@ -49,10 +54,15 @@ impl Im2ColDir{
             c_start: (conv_info.param_info.b_offset + conv_info.param_info.b_strides[dir_i]) as u32,
             n_outputs: conv_info.activity_info.dim[dir_i].tens_length as u32,
 
+            batch_swap_buffer_size: conv_info.activity_info.batch_swap_buffer_size as u32,
+
             n: conv_layer.n_kernals as u32,
             m: (conv_info.activity_info.dim[dir_i].tens_length * conv_info.n_batches) as u32,
             k: conv_layer.kernal_info.size as u32,
             
+            _pad1: 0,
+            _pad2: 0,
+            _pad3: 0,
         }
     }
 }
@@ -66,7 +76,7 @@ pub struct PoolDir{
     read_start: u32,
     write_start: u32,
     pool_k: u32,
-    _pad: u32,
+    batch_swap_buffer_size: u32,
 }
 
 impl PoolDir{
@@ -84,7 +94,7 @@ impl PoolDir{
             write_start: 0,
 
             pool_k: conv_layer.pooling_info.k as u32,
-            _pad: 0,
+            batch_swap_buffer_size: conv_info.activity_info.batch_swap_buffer_size as u32,
         }
     }
 }

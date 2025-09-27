@@ -287,6 +287,8 @@ pub struct ConvActivityInfo{
     pub dim: Vec<TensorInfo>, 
     pub strides: Vec<usize>,
 
+    pub batch_swap_buffer_size: usize,
+
     pub swap_buffer_size: usize,
     pub deriv_buffer_size: usize,
 
@@ -337,6 +339,8 @@ impl ConvActivityInfo{
 
             dim: layer_dim,
             strides: strides,
+
+            batch_swap_buffer_size: largest_layer,
             swap_buffer_size: swap_buffer_size,
             deriv_buffer_size: swap_buffer_size,
 
@@ -349,9 +353,10 @@ impl ConvActivityInfo{
 
     pub fn create_buffer(&self) -> Vec<f32>{
         let mut empty = vec![0.0; self.size];
+        let largest_layer = self.swap_buffer_size / self.n_batches;
 
         for i in 0..self.size{
-            empty[i] = i as f32;
+            empty[i] = (i % largest_layer) as f32;
         }
 
         // println!("{:?}", &empty[0..784]);

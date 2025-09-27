@@ -320,8 +320,8 @@ impl ConvDispatch{
             });
 
             
-            let layer_i = 0;
-            // for layer_i in 0..(self.conv_info.n_layers - 1){
+            // let layer_i = 0;
+            for layer_i in 0..(self.conv_info.n_layers - 1){
                 {
                     let dyn_off = layer_i as u32 * self.forward_mat_pass_info.dir_slot_size as u32;
                     pass.set_pipeline(&self.forward_mat_pass_info.pipeline);
@@ -342,9 +342,9 @@ impl ConvDispatch{
                     let gx = ceil_div(self.conv_info.conv_layers[layer_i].layer_dim[0], self.forward_pool_pass_info.workgroup_dim.x);
                     let gy = ceil_div(self.conv_info.conv_layers[layer_i].layer_dim[1], self.forward_pool_pass_info.workgroup_dim.y);
 
-                    pass.dispatch_workgroups(gx as u32, gy as u32, self.conv_info.conv_layers[layer_i].n_kernals as u32);
+                    pass.dispatch_workgroups(gx as u32, gy as u32, (self.conv_info.conv_layers[layer_i].n_kernals * self.conv_info.n_batches) as u32);
                 }
-            // }
+            }
         }
 
         let forward_commands = encoder.finish();
@@ -377,16 +377,20 @@ impl ConvDispatch{
         
         // let mut prev_idx = 0; //1960
         // let mut curr_idx = 0 + 14;
-        let mut prev_idx = 1960;
-        let mut curr_idx = 1960 + 28;
+
+        // let start_idx = self.conv_info.activity_info.swap_buffer_size;
+        // let layer_size = 28;
+
+        let start_idx = self.conv_info.activity_info.swap_buffer_size / self.conv_info.n_batches;
+        let layer_size = 7;
+
+        let mut prev_idx = start_idx;
+        let mut curr_idx = prev_idx + layer_size;
         
-        while curr_idx <= 1960 * 2{
-            // println!("{} activity buffer: {:?}", (((prev_idx) / 14 )% 14), &out[prev_idx..curr_idx]);
-            // prev_idx += 14;
-            // curr_idx += 14;
-            println!("{} activity buffer: {:?}", (((prev_idx - 1960) / 28 )% 28), &out[prev_idx..curr_idx]);
-            prev_idx += 28;
-            curr_idx += 28;
+        while curr_idx <= start_idx + layer_size * 30{
+            println!("{} activity buffer: {:?}", (((prev_idx - start_idx) / layer_size )% layer_size), &out[prev_idx..curr_idx]);
+            prev_idx += layer_size;
+            curr_idx += layer_size;
         }
 
 
