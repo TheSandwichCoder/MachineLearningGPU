@@ -57,3 +57,34 @@ impl Im2ColDir{
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct PoolDir{
+    i_layer_dim: [u32; 4],
+    o_layer_dim: [u32; 4],
+
+    read_start: u32,
+    write_start: u32,
+    pool_k: u32,
+    _pad: u32,
+}
+
+impl PoolDir{
+    pub fn new(conv_info: &ConvolutionInfo, dir_i: usize) -> Self{
+        let conv_layer = &conv_info.conv_layers[dir_i];
+        let next_conv_layer = &conv_info.conv_layers[dir_i + 1];
+
+        println!("{:?}", &next_conv_layer.layer_dim);
+
+        return PoolDir{
+            i_layer_dim: [conv_layer.layer_dim[0] as u32, conv_layer.layer_dim[1] as u32, next_conv_layer.layer_dim[2] as u32, 0],
+            o_layer_dim: [next_conv_layer.layer_dim[0] as u32, next_conv_layer.layer_dim[1] as u32, next_conv_layer.layer_dim[2] as u32, 0],
+
+            read_start: conv_info.activity_info.swap_buffer_size as u32,
+            write_start: 0,
+
+            pool_k: conv_layer.pooling_info.k as u32,
+            _pad: 0,
+        }
+    }
+}

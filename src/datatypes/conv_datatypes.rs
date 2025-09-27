@@ -199,7 +199,7 @@ pub struct ConvLayerInfo{
 
     pub n_kernals: usize,
     pub kernal_info: KernalInfo,
-    pub pooling: PoolingInfo,
+    pub pooling_info: PoolingInfo,
 }
 
 impl ConvLayerInfo{
@@ -216,7 +216,7 @@ impl ConvLayerInfo{
             
             n_kernals: n_kernals,
             kernal_info: kernal_info,
-            pooling: pooling_info,
+            pooling_info: pooling_info,
         }
     }
 }

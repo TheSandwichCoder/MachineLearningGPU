@@ -116,9 +116,9 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
 
 
     if !is_dead{
-        // v += read_buffer1[mat_dir.c_start + g_n];
+        v += read_buffer1[mat_dir.c_start + g_n];
 
-        // v = ReLu(v);
+        v = ReLu(v);
 
         let write_idx = g_n * mat_dir.m + g_m;
 
@@ -150,7 +150,7 @@ fn flatten_safe(v: vec3i, k: vec3i) -> i32{
 }
 
 fn flatten(v: vec3i, k: vec3i) -> i32{
-    let val = v.z * k.x * k.y + v.y + k.y + v.x;
+    let val = v.z * k.x * k.y + v.y * k.x + v.x;
     
     return val;
 }

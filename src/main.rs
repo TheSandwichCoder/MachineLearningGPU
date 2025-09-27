@@ -24,7 +24,7 @@ fn main() {
 
     conv_construct.set_inputs(vec![28, 28, 1], 3);
     conv_construct.set_pool(vec![2, 2]);
-    conv_construct.set_kernal(vec![8, 4]);
+    conv_construct.set_kernal(vec![4, 2]);
     conv_construct.set_outputs(vec![10, 1]);
     conv_construct.set_n_batches(1);
 
