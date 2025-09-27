@@ -25,7 +25,7 @@ fn main() {
     conv_construct.set_inputs(vec![28, 28, 1], 3);
     conv_construct.set_pool(vec![2, 2]);
     conv_construct.set_kernal(vec![4, 2]);
-    conv_construct.set_outputs(vec![10, 1]);
+    conv_construct.set_outputs(vec![32, 16]);
     conv_construct.set_n_batches(1);
 
     // let conv_info = ConvolutionInfo::construct(conv_construct);

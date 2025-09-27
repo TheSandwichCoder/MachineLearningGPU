@@ -142,7 +142,7 @@ impl ConvolutionInfo{
             conv_layers.push(layer_info);
         }
 
-        let activity_info = ConvActivityInfo::new(&conv_layers);
+        let activity_info = ConvActivityInfo::new(&conv_layers, constructor.n_batches);
         let param_info = ConvParamInfo::new(&conv_layers);
 
         return ConvolutionInfo{
@@ -282,6 +282,7 @@ Deriv Buffer
 #[derive (Clone)]
 pub struct ConvActivityInfo{
     pub offset: usize,
+    pub n_batches: usize,
     
     pub dim: Vec<TensorInfo>, 
     pub strides: Vec<usize>,
@@ -296,14 +297,16 @@ pub struct ConvActivityInfo{
 }
 
 impl ConvActivityInfo{
-    pub fn new(layer_info: &Vec<ConvLayerInfo>) -> Self{
+    pub fn new(layer_info: &Vec<ConvLayerInfo>, n_batches: usize) -> Self{
         let largest_layer = get_layer_max(layer_info);
 
         let mut t_length = 0;
         let mut layer_dim = Vec::new();
+
+        let swap_buffer_size = largest_layer * n_batches;
         
         // swap buffer
-        t_length += largest_layer * 2;
+        t_length += swap_buffer_size * 2;
         
         // storage buffer
         let s_start = t_length;
@@ -315,7 +318,7 @@ impl ConvActivityInfo{
             let mut reversed = layer.layer_dim.clone();
             reversed.reverse(); 
             let tens_info = TensorInfo::new(&reversed);
-            stride_offset += tens_info.tens_length;
+            stride_offset += tens_info.tens_length * n_batches;
             
             strides.push(stride_offset);
             layer_dim.push(tens_info);
@@ -326,14 +329,16 @@ impl ConvActivityInfo{
         // derivative buffer
         let d_start = t_length;
 
-        t_length += largest_layer * 2;
+        t_length += swap_buffer_size * 2;
 
         return ConvActivityInfo{
             offset: 0,
+            n_batches,
+
             dim: layer_dim,
             strides: strides,
-            swap_buffer_size: largest_layer,
-            deriv_buffer_size: largest_layer,
+            swap_buffer_size: swap_buffer_size,
+            deriv_buffer_size: swap_buffer_size,
 
             size: t_length,
 

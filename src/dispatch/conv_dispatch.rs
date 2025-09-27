@@ -320,8 +320,8 @@ impl ConvDispatch{
             });
 
             
-            // let layer_i = 0;
-            for layer_i in 0..(self.conv_info.n_layers - 1){
+            let layer_i = 0;
+            // for layer_i in 0..(self.conv_info.n_layers - 1){
                 {
                     let dyn_off = layer_i as u32 * self.forward_mat_pass_info.dir_slot_size as u32;
                     pass.set_pipeline(&self.forward_mat_pass_info.pipeline);
@@ -344,7 +344,7 @@ impl ConvDispatch{
 
                     pass.dispatch_workgroups(gx as u32, gy as u32, self.conv_info.conv_layers[layer_i].n_kernals as u32);
                 }
-            }
+            // }
         }
 
         let forward_commands = encoder.finish();
@@ -375,18 +375,18 @@ impl ConvDispatch{
         let out: &[f32] = bytemuck::cast_slice(&data);
 
         
-        let mut prev_idx = 0; //1960
-        let mut curr_idx = 0 + 14;
-        // let mut prev_idx = 1960;
-        // let mut curr_idx = 1960 + 28;
+        // let mut prev_idx = 0; //1960
+        // let mut curr_idx = 0 + 14;
+        let mut prev_idx = 1960;
+        let mut curr_idx = 1960 + 28;
         
         while curr_idx <= 1960 * 2{
-            println!("{} activity buffer: {:?}", (((prev_idx) / 14 )% 14), &out[prev_idx..curr_idx]);
-            prev_idx += 14;
-            curr_idx += 14;
-            // println!("{} activity buffer: {:?}", (((prev_idx - 1960) / 28 )% 28), &out[prev_idx..curr_idx]);
-            // prev_idx += 28;
-            // curr_idx += 28;
+            // println!("{} activity buffer: {:?}", (((prev_idx) / 14 )% 14), &out[prev_idx..curr_idx]);
+            // prev_idx += 14;
+            // curr_idx += 14;
+            println!("{} activity buffer: {:?}", (((prev_idx - 1960) / 28 )% 28), &out[prev_idx..curr_idx]);
+            prev_idx += 28;
+            curr_idx += 28;
         }
 
 

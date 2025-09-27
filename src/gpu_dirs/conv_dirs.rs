@@ -26,7 +26,7 @@ pub struct Im2ColDir{
 
     c_start: u32,
 
-    transpose: u32,
+    n_outputs: u32,
 
     n: u32,
     m: u32,
@@ -47,10 +47,10 @@ impl Im2ColDir{
             write_start: conv_info.activity_info.swap_buffer_size as u32,
 
             c_start: (conv_info.param_info.b_offset + conv_info.param_info.b_strides[dir_i]) as u32,
-            transpose: 0,
+            n_outputs: conv_info.activity_info.dim[dir_i].tens_length as u32,
 
             n: conv_layer.n_kernals as u32,
-            m: conv_info.activity_info.dim[dir_i].tens_length as u32,
+            m: (conv_info.activity_info.dim[dir_i].tens_length * conv_info.n_batches) as u32,
             k: conv_layer.kernal_info.size as u32,
             
         }

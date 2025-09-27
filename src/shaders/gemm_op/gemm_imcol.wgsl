@@ -9,7 +9,8 @@ struct MatrixDir{
 
     c_start: u32,
 
-    transpose: u32,
+    // transpose: u32,
+    n_outputs: u32, // number of outputs for a single batch
 
     n: u32,
     m: u32,
@@ -47,12 +48,15 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
     let g_n = w_n * T_N + t_n;
     let g_m = w_m * T_M + t_m;
 
+    let batch_g_m = g_m % mat_dir.n_outputs;
+    let batch_i = g_m / mat_dir.n_outputs;
+
     var v = 0.0;
 
 
     let is_dead : bool = (g_n >= mat_dir.n || g_m >= mat_dir.m);
     
-    let glob_kernal_pos = expand(g_m, mat_dir.layer_dim.xyz);
+    let glob_kernal_pos = expand(batch_g_m, mat_dir.layer_dim.xyz);
 
     let kernal_i_offset = g_n * mat_dir.k;
     
@@ -84,7 +88,6 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
             }
             else{
                 b_sub[t_n][t_m] = read_buffer2[mat_dir.layer_read_start + u32(read_idx)];
-                // b_sub[t_n][t_m] = f32(read_pos.y);
             }
         }    
         
@@ -95,20 +98,10 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
             let limit = min(T_K, mat_dir.k - k_i);
 
             for (var i: u32 = 0; i < limit; i++) {
-                // v += a_sub[t_n][i];
                 v += a_sub[t_n][i] * b_sub[i][t_m];
-                // v = f32(rel_kernal_pos.y * 28 + rel_kernal_pos.x);
-                // v = b_sub[i][t_m];
-
-                // if b_sub[i][t_m] != 0.0{
-                //     v += 1.0;
-                // }
             }
         }
         
-
-        // v += 1.0;
-
         workgroupBarrier();
 
         k_i += T_K;
@@ -120,10 +113,9 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
 
         v = ReLu(v);
 
-        let write_idx = g_n * mat_dir.m + g_m;
+        let write_idx = g_n * mat_dir.n_outputs + batch_g_m + batch_i * mat_dir.n_outputs * mat_dir.n;
 
         read_buffer2[mat_dir.write_start + u32(write_idx)] = v;
-        // read_buffer2[mat_dir.write_start + u32(write_idx)] = 2.0;
     }
 }
 
