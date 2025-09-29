@@ -15,7 +15,7 @@ kernal dim
 */
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-pub struct Im2ColDir{
+pub struct Im2ColDir_F{
     kernal: [u32; 4],
     kernal_offset: [i32; 4],
     layer: [u32; 4],
@@ -38,13 +38,13 @@ pub struct Im2ColDir{
     _pad3: u32,
 }
 
-impl Im2ColDir{
+impl Im2ColDir_F{
     pub fn new(conv_info: &ConvolutionInfo, dir_i: usize) -> Self{
         let conv_layer = &conv_info.conv_layers[dir_i]; 
 
-        return Im2ColDir{
+        return Im2ColDir_F{
             kernal: [conv_layer.kernal_info.dim[0] as u32, conv_layer.kernal_info.dim[1] as u32, conv_layer.kernal_info.dim[2] as u32, 0],
-            kernal_offset: [conv_layer.kernal_info.k_range.start_idx, conv_layer.kernal_info.k_range.start_idx, conv_layer.kernal_info.c_range.start_idx, 0],
+            kernal_offset: [conv_layer.kernal_info.k_range.start_idx, conv_layer.kernal_info.k_range.start_idx, 0, 0],
             layer: [conv_layer.layer_dim[0] as u32, conv_layer.layer_dim[1] as u32, conv_layer.layer_dim[2] as u32, 0],
             
             kernal_read_start: conv_info.param_info.k_strides[dir_i] as u32,
@@ -57,12 +57,125 @@ impl Im2ColDir{
             batch_swap_buffer_size: conv_info.activity_info.batch_swap_buffer_size as u32,
 
             n: conv_layer.n_kernals as u32,
-            m: (conv_info.activity_info.dim[dir_i].tens_length * conv_info.n_batches) as u32,
+            m: (conv_layer.layer_size_2d * conv_info.n_batches) as u32,
             k: conv_layer.kernal_info.size as u32,
             
             _pad1: 0,
             _pad2: 0,
             _pad3: 0,
+        }
+    }
+}
+
+// Backwards Gradients
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct Im2ColDir_BG{
+    kernal: [u32; 4],
+    o_layer_offset: [i32; 4],
+    o_layer_dim: [u32; 4],
+    i_layer_dim: [u32; 4],
+
+    deriv_read_start: u32,
+    input_read_start: u32,
+    write_start: u32,
+
+    c_start: u32,
+
+    n_outputs: u32,
+    batch_swap_buffer_size: u32,
+
+    split_k: u32,
+    n_k_splits: u32,
+
+    n: u32,
+    m: u32,
+    k: u32,
+
+    _pad1: u32,
+}
+
+impl Im2ColDir_BG{
+    pub fn new(conv_info: &ConvolutionInfo, dir_i: usize) -> Self{
+        let curr_conv_layer = &conv_info.conv_layers[dir_i]; 
+        let next_conv_layer = &conv_info.conv_layers[dir_i + 1];
+
+        return Im2ColDir_BG{
+            kernal: [curr_conv_layer.kernal_info.dim[0] as u32, curr_conv_layer.kernal_info.dim[1] as u32, curr_conv_layer.kernal_info.dim[2] as u32, 0],
+            o_layer_offset: [0; 4],
+            o_layer_dim: [next_conv_layer.layer_dim[0] as u32, next_conv_layer.layer_dim[1] as u32, next_conv_layer.layer_dim[2] as u32, 0],
+            i_layer_dim: [curr_conv_layer.layer_dim[0] as u32, curr_conv_layer.layer_dim[1] as u32, curr_conv_layer.layer_dim[2] as u32, 0],
+
+            deriv_read_start: 0,
+            input_read_start: 0,
+            write_start: 0,
+
+            c_start: 0,
+
+            n_outputs: 0,
+            batch_swap_buffer_size: 0,
+
+            split_k: 0,
+            n_k_splits: 0,
+
+            n: 0,
+            m: 0,
+            k: 0,
+
+            _pad1: 0,
+        }
+    }
+}
+
+// Backwards derivatives
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct Im2ColDir_BD{
+    kernal: [u32; 4],
+    o_layer_dim: [u32; 4],
+
+    kernal_read_start: u32,
+    layer_read_start: u32,
+    write_start: u32,
+
+    c_start: u32,
+
+    n_outputs: u32,
+    batch_swap_buffer_size: u32,
+    kernal_size: u32,
+
+    n: u32,
+    m: u32,
+    k: u32,
+
+    _pad1: u32,
+    _pad2: u32,
+}
+
+impl Im2ColDir_BD{
+    pub fn new(conv_info: &ConvolutionInfo, dir_i: usize) -> Self{
+        let conv_layer = &conv_info.conv_layers[dir_i]; 
+
+        return Im2ColDir_BD{
+            kernal: [0; 4],
+            o_layer_dim: [0; 4],
+
+            kernal_read_start: 0,
+            layer_read_start: 0,
+            write_start: 0,
+
+            c_start: 0,
+
+            n_outputs: 0,
+            batch_swap_buffer_size: 0,
+            kernal_size: 0,
+
+            n: 0,
+            m: 0,
+            k: 0,
+
+            _pad1: 0,
+            _pad2: 0,
         }
     }
 }

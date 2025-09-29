@@ -1,25 +1,28 @@
 struct MatrixDir{
     kernal_dim: vec4<u32>,
-    kernal_offset: vec4<i32>,
-    layer_dim: vec4<u32>,
+    o_layer_offset: vec4<i32>,
+    o_layer_dim: vec4<u32>,
+    i_layer_dim: vec4<u32>,
 
-    kernal_read_start: u32,
-    layer_read_start: u32,
+    deriv_read_start: u32,
+    input_read_start: u32,
     write_start: u32,
 
     c_start: u32,
 
-    // transpose: u32,
     n_outputs: u32, // number of outputs for a single batch
     batch_swap_buffer_size: u32, // size of the swap buffer for a single input
+
+    split_k: u32, // num of values in k slice
+    n_k_splits: u32, // num of k slices
 
     n: u32,
     m: u32,
     k: u32
 }
 
-@group(0) @binding(0) var<storage, read> read_buffer1: array<f32>;
-@group(0) @binding(1) var<storage, read_write> read_buffer2: array<f32>;
+@group(0) @binding(0) var<storage, read> read_buffer: array<f32>;
+@group(0) @binding(1) var<storage, read_write> write_buffer: array<f32>;
 
 @group(0) @binding(2) var <uniform> mat_dir: MatrixDir;
 
@@ -38,7 +41,6 @@ var<workgroup> b_sub : array<array<f32, T_N>, T_K>;
 @compute @workgroup_size(T_N, T_M)
 fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
     
-    var k_i : u32 = 0;
 
     let w_n = wg.x;
     let w_m = wg.y;
@@ -48,6 +50,9 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
 
     let g_n = w_n * T_N + t_n;
     let g_m = w_m * T_M + t_m;
+
+    var k_i : u32 = mat_dir.split_k * wg.z;
+    let k_stop: u32 = mat_dir.split_k * (wg.z + 1);
 
     let batch_g_m = g_m % mat_dir.n_outputs;
     let batch_i = g_m / mat_dir.n_outputs;
@@ -59,12 +64,12 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
 
     let is_dead : bool = (g_n >= mat_dir.n || g_m >= mat_dir.m);
     
-    let glob_kernal_pos = expand(batch_g_m, mat_dir.layer_dim.xyz);
+    let glob_kernal_pos = expand(batch_g_m, mat_dir.kernal_dim.xyz);
 
     let kernal_i_offset = g_n * mat_dir.k;
     
     loop{
-        if k_i >= mat_dir.k{
+        if k_i >= mat_dir.k || k_i >= k_stop{
             break;
         }
 
@@ -77,20 +82,21 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
         if (g_n < mat_dir.n && l_m_i < mat_dir.k){
             let read_idx = kernal_i_offset + l_m_i;
 
-            a_sub[t_n][t_m] = read_buffer1[mat_dir.kernal_read_start + read_idx];
+            a_sub[t_n][t_m] = read_buffer[mat_dir.deriv_read_start + read_idx];
         }
+        
         if (g_m < mat_dir.m && l_n_i < mat_dir.k){
-            let rel_kernal_pos = expand(l_n_i, mat_dir.kernal_dim.xyz);
+            let rel_kernal_pos = expand(l_n_i, mat_dir.o_layer_dim.xyz);
             
-            let read_pos = glob_kernal_pos + rel_kernal_pos + mat_dir.kernal_offset.xyz;
+            let read_pos = rel_kernal_pos + glob_kernal_pos + mat_dir.o_layer_offset.xyz;
 
-            let read_idx = flatten_safe(read_pos, vec3i(mat_dir.layer_dim.xyz));
+            let read_idx = flatten_safe(read_pos, vec3i(mat_dir.i_layer_dim.xyz));
 
             if read_idx == -1{
                 b_sub[t_n][t_m] = 0.0;
             }
             else{
-                b_sub[t_n][t_m] = read_buffer2[mat_dir.layer_read_start + u32(read_idx) + batch_buffer_offset];
+                b_sub[t_n][t_m] = read_buffer[mat_dir.input_read_start + u32(read_idx) + batch_buffer_offset];
             }
         }    
         
@@ -116,9 +122,9 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
 
         // v = ReLu(v);
 
-        let write_idx = g_n * mat_dir.n_outputs + batch_g_m;
+        let write_idx = g_n * mat_dir.n_outputs + batch_g_m * mat_dir.n_k_splits + wg.z;
 
-        read_buffer2[mat_dir.write_start + u32(write_idx) + batch_buffer_offset] = v;
+        write_buffer[mat_dir.write_start + u32(write_idx) + batch_buffer_offset] = v;
     }
 }
 

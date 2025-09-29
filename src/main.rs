@@ -31,7 +31,7 @@ fn main() {
     // let conv_info = ConvolutionInfo::construct(conv_construct);
 
     let gpu_instance = pollster::block_on(GPUInstance::new());
-    let mut conv_dispatch = ConvDispatch::new(&gpu_instance, conv_construct, 1);
+    let mut conv_dispatch = ConvDispatch::new(&gpu_instance, conv_construct);
 
     conv_dispatch.conv_info.show_all_specs();
     

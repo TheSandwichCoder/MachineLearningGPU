@@ -36,6 +36,7 @@ pub struct ConvolutionConstructor{
     pub i_c: usize,
     pub n_layers: usize,
     pub n_batches: usize,
+    pub split_k: usize,
 
     pub pooling_dim: Vec<usize>,
     pub kernal_dim: Vec<usize>,
@@ -50,6 +51,7 @@ impl ConvolutionConstructor{
             i_c: 0,
             n_layers: 0,
             n_batches: 0,
+            split_k: 16,
 
             pooling_dim: Vec::new(),
             kernal_dim: Vec::new(),
@@ -91,6 +93,7 @@ pub struct ConvolutionInfo{
     pub output_layer_dim: Vec<usize>,
     pub n_layers: usize,
     pub n_batches: usize,
+    pub split_k: usize,
 }
 
 impl ConvolutionInfo{
@@ -143,7 +146,7 @@ impl ConvolutionInfo{
         }
 
         let activity_info = ConvActivityInfo::new(&conv_layers, constructor.n_batches);
-        let param_info = ConvParamInfo::new(&conv_layers);
+        let param_info = ConvParamInfo::new(&conv_layers, constructor.split_k);
 
         return ConvolutionInfo{
             conv_layers: conv_layers,
@@ -153,6 +156,7 @@ impl ConvolutionInfo{
             output_layer_dim: vec![output_layer_x, output_layer_y, output_layer_c],
             n_layers: constructor.n_layers,
             n_batches: constructor.n_batches,
+            split_k: constructor.split_k,
         }
     }
 
@@ -196,7 +200,9 @@ impl ConvolutionInfo{
 #[derive (Clone)]
 pub struct ConvLayerInfo{
     pub layer_dim: Vec<usize>,
+    pub layer_offset: Vec<usize>,
 
+    pub layer_size_2d: usize,
     pub n_kernals: usize,
     pub kernal_info: KernalInfo,
     pub pooling_info: PoolingInfo,
@@ -210,10 +216,13 @@ impl ConvLayerInfo{
         let mut kernal_info = KernalInfo::new(kernal_dim);
 
         let pooling_info = PoolingInfo::new(&layer_dim, pool_size);
+        let layer_size_2d = layer_dim[0] * layer_dim[1];
 
         return ConvLayerInfo{
             layer_dim: layer_dim,
+            layer_offset: Vec::new(),
             
+            layer_size_2d: layer_size_2d,
             n_kernals: n_kernals,
             kernal_info: kernal_info,
             pooling_info: pooling_info,
@@ -243,7 +252,6 @@ pub struct KernalInfo{
     pub dim: Vec<usize>,
     pub tens: TensorInfo,
     pub k_range: KernalRange,
-    pub c_range: KernalRange,
     pub size: usize,
 }
 
@@ -256,7 +264,6 @@ impl KernalInfo{
         let c = kernal_dim[2];
 
         let k_range = KernalRange::new(-(floor_div(k, 2) as i32), ceil_div(k, 2) as i32);
-        let c_range = KernalRange::new(-(floor_div(c, 2) as i32), ceil_div(c, 2) as i32);
 
         let tens = TensorInfo::new(&reversed);
         let size = tens.tens_length;
@@ -265,7 +272,6 @@ impl KernalInfo{
             dim: kernal_dim,
             tens: tens,
             k_range: k_range,
-            c_range: c_range,
             size: size,
         }
     }
@@ -353,17 +359,21 @@ impl ConvActivityInfo{
 
     pub fn create_buffer(&self) -> Vec<f32>{
         let mut empty = vec![0.0; self.size];
-        let largest_layer = self.swap_buffer_size / self.n_batches;
+        let largest_layer = self.batch_swap_buffer_size;
 
         for i in 0..self.size{
             empty[i] = (i % largest_layer) as f32;
         }
 
+        // for i in d_start..self.size{
+        //     empty[i] = 1.0;
+        // }
+
         // println!("{:?}", &empty[0..784]);
 
         return empty;
 
-        return vec![1.0; self.size];
+        // return vec![1.0; self.size];
     }
 }
 
@@ -380,14 +390,19 @@ pub struct ConvParamInfo{
     pub b_strides: Vec<usize>, // bias strides
 
     pub b_offset: usize,
+    pub split_k: usize,
+    pub largest_layer: usize,
 
     pub size: usize,
 }
 
 impl ConvParamInfo{
-    pub fn new(layer_info: &Vec<ConvLayerInfo>) -> Self{
+    pub fn new(layer_info: &Vec<ConvLayerInfo>, split_k: usize) -> Self{
+
         let mut layer_dim = Vec::new();
         let mut kernal_count = Vec::new();
+
+        let largest_layer = get_layer_max(layer_info);
 
         let mut t_size = 0;
         let mut b_offset = 0;
@@ -422,6 +437,8 @@ impl ConvParamInfo{
             b_strides: b_strides,
 
             b_offset: b_offset,
+            split_k: split_k,
+            largest_layer: largest_layer,
 
             size: t_size,
         }
@@ -430,20 +447,31 @@ impl ConvParamInfo{
     pub fn create_buffer(&self) -> Vec<f32>{
         let mut empty_vec = vec![1.0; self.size];
 
-        for i in 0..self.size{
+        for i in 0..self.k_strides[1]{
             empty_vec[i] = (i as f32 - 32.0) / 64.0;
         }
+        for i in self.k_strides[1]..self.k_strides[2]{
+            empty_vec[i] = ((i - self.k_strides[1]) as f32 - 32.0) / 64.0;
+        }
 
+        println!("{:?}", &empty_vec[self.k_strides[1]..self.k_strides[2]]);
+        
         return empty_vec;
 
-        let mut rng = rand::thread_rng();
+        // let mut rng = rand::thread_rng();
 
-        let random_floats: Vec<f32> = (0..self.size)
-            .map(|_| rng.gen_range(-1.0..=1.0))
-            .collect();
+        // let random_floats: Vec<f32> = (0..self.size)
+        //     .map(|_| rng.gen_range(-1.0..=1.0))
+        //     .collect();
     
 
-        return random_floats;
+        // return random_floats;
+    }
+    
+    pub fn create_accumulate_buffer_empty(&self) -> Vec<f32>{
+        let n_split_k = ceil_div(self.largest_layer, self.split_k); 
+
+        return vec![0.0; self.largest_layer * n_split_k];
     }
 
     pub fn create_buffer_empty(&self) -> Vec<f32>{

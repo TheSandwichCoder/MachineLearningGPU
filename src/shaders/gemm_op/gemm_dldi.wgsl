@@ -1,6 +1,5 @@
 struct MatrixDir{
     kernal_dim: vec4<u32>,
-    kernal_offset: vec4<i32>,
     layer_dim: vec4<u32>,
 
     kernal_read_start: u32,
@@ -9,9 +8,10 @@ struct MatrixDir{
 
     c_start: u32,
 
-    // transpose: u32,
     n_outputs: u32, // number of outputs for a single batch
     batch_swap_buffer_size: u32, // size of the swap buffer for a single input
+
+    kernal_size: u32, // number of values in the 2d kernal
 
     n: u32,
     m: u32,
@@ -75,14 +75,14 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
         // assignment for forward
 
         if (g_n < mat_dir.n && l_m_i < mat_dir.k){
-            let read_idx = kernal_i_offset + l_m_i;
+            let read_idx = kernal_i_offset + (mat_dir.kernal_size - l_m_i); // rotate kernal by 180
 
             a_sub[t_n][t_m] = read_buffer1[mat_dir.kernal_read_start + read_idx];
         }
         if (g_m < mat_dir.m && l_n_i < mat_dir.k){
             let rel_kernal_pos = expand(l_n_i, mat_dir.kernal_dim.xyz);
             
-            let read_pos = glob_kernal_pos + rel_kernal_pos + mat_dir.kernal_offset.xyz;
+            let read_pos = rel_kernal_pos + glob_kernal_pos;
 
             let read_idx = flatten_safe(read_pos, vec3i(mat_dir.layer_dim.xyz));
 
