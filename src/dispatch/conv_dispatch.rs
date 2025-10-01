@@ -52,6 +52,7 @@ pub struct ConvDispatch{
     forward_pool_pass_info: ConvPassInfo,
     backward_gradient_pass_info: ConvPassInfo,
     backward_deriv_pass_info: ConvPassInfo,
+    gradient_acc_pass_info: ConvPassInfo,
     
     pub conv_info: ConvolutionInfo,
 }
@@ -71,20 +72,20 @@ impl ConvDispatch{
 
         let gradient_buffer = gpu_instance.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("cgradient buffer"),
-            contents: bytemuck::cast_slice(&conv_info.param_info.create_buffer_empty()),
+            contents: bytemuck::cast_slice(&conv_info.param_info.create_buffer_empty(conv_info.n_batches)),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
 
         let accumulate_buffer = gpu_instance.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("accumulate buffer"),
             // do this
-            contents: bytemuck::cast_slice(&conv_info.param_info.create_accumulate_buffer_empty()),
+            contents: bytemuck::cast_slice(&conv_info.param_info.create_accumulate_buffer_empty(conv_info.n_batches)),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
         
         let momentum_buffer = gpu_instance.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("cmomentum buffer"),
-            contents: bytemuck::cast_slice(&conv_info.param_info.create_buffer_empty()),
+            contents: bytemuck::cast_slice(&conv_info.param_info.create_buffer_empty(1)),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
 
@@ -302,6 +303,109 @@ impl ConvDispatch{
 
         // +--------------------------------------------------------+
         // |                                                        |
+        // |               Gradient Accumualte Pass                 |
+        // |                                                        |
+        // +--------------------------------------------------------+
+
+        let gradient_acc_bind_layout = gpu_instance.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("gradient_acc_bind_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<AccDir>() as u64),
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let gradient_acc_slot = ((std::mem::size_of::<AccDir>() as u64 + gpu_instance.align - 1) / gpu_instance.align) * gpu_instance.align;
+
+        let gradient_acc_dir_buffer_size = gradient_acc_slot * (conv_info.n_layers - 1) as u64;
+
+        let gradient_acc_dir_buffer = gpu_instance.device.create_buffer(&wgpu::BufferDescriptor{
+            label: Some("cgradient_acc_dir_buf"),
+            size: gradient_acc_dir_buffer_size,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // ---------------------Special Binding---------------------
+        let gradient_acc_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &gradient_acc_dir_buffer,
+            offset: 0,
+            size: Some(wgpu::BufferSize::new(gradient_acc_slot).unwrap()),
+        });
+
+
+        // ---------------------Shader Sources---------------------
+        let wgsl_src = include_str!("../shaders/conv_op/acc_gradients.wgsl");
+        let gradient_acc_shader = gpu_instance.device.create_shader_module(wgpu::ShaderModuleDescriptor{
+            label: Some("acc_gradient_shader"),
+            source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
+        });
+
+        let gradient_acc_bind_group = gpu_instance.device.create_bind_group(&wgpu::BindGroupDescriptor{
+            label: Some("bg"),
+            layout: &gradient_acc_bind_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: accumulate_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: gradient_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: gradient_acc_dir_binding },
+            ],
+        });
+
+            // ---------------------Update Meta---------------------
+
+        for layer_i in 0..conv_info.n_layers - 1{            
+            let gradient_acc_dir = AccDir::new(&conv_info, layer_i);
+
+            gpu_instance.queue.write_buffer(&gradient_acc_dir_buffer, layer_i as u64 * gradient_acc_slot, bytemuck::bytes_of(&gradient_acc_dir));
+        }
+
+        // ---------------------Pipeline Layout---------------------
+
+        let gradient_acc_pipeline_layout = gpu_instance.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
+            label: Some("cgradient_acc_pipeline_layout"),
+            bind_group_layouts: &[&gradient_acc_bind_layout],
+            push_constant_ranges: &[],
+        });
+
+        let gradient_acc_pipeline = gpu_instance.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("gradient_acc_pipeline"),
+            layout: Some(&gradient_acc_pipeline_layout),
+            module: &gradient_acc_shader,
+            entry_point: Some("main"),
+            cache: None,
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });        
+
+        // +--------------------------------------------------------+
+        // |                                                        |
         // |                Backward Gradient Pass                  |
         // |                                                        |
         // +--------------------------------------------------------+
@@ -515,6 +619,8 @@ impl ConvDispatch{
         let backward_gradient_pass_info = ConvPassInfo::new(backward_gradient_dir_buffer, backward_gradient_shader, backward_gradient_bind_group, backward_gradient_pipeline, imcol_bg_slot, gem_wg.clone());
         let backward_deriv_pass_info = ConvPassInfo::new(backward_deriv_dir_buffer, backward_deriv_shader, backward_deriv_bind_group, backward_deriv_pipeline, imcol_bd_slot, gem_wg.clone());
 
+        let gradient_acc_pass_info = ConvPassInfo::new(gradient_acc_dir_buffer, gradient_acc_shader, gradient_acc_bind_group, gradient_acc_pipeline, gradient_acc_slot, vec![32, 0, 0]);
+
         return ConvDispatch{
             param_buffer,
             gradient_buffer,
@@ -528,9 +634,36 @@ impl ConvDispatch{
             backward_gradient_pass_info,
             backward_deriv_pass_info,
 
+            gradient_acc_pass_info,
+
             conv_info,
         }
     }
+
+    pub fn backward_conv_mat(&self, gpu_instance: &GPUInstance){
+        let mut encoder = gpu_instance.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("cpass"),
+                timestamp_writes: None,
+            });
+
+            let layer_i = self.conv_info.n_layers - 1;
+
+            let dyn_off = layer_i as u32 * self.gradient_acc_pass_info.dir_slot_size as u32;
+            pass.set_pipeline(&self.gradient_acc_pass_info.pipeline);
+            pass.set_bind_group(0, &self.gradient_acc_pass_info.bind_group, &[dyn_off]);
+            
+            let gx = ceil_div(self.conv_info.conv_layers[layer_i].n_kernals, self.gradient_acc_pass_info.workgroup_dim.x);
+            let gy = ceil_div(self.conv_info.activity_info.dim[layer_i].tens_length, self.gradient_acc_pass_info.workgroup_dim.y);
+            
+            pass.dispatch_workgroups(gx as u32, gy as u32, 1);
+
+
+        }
+    }
+
 
     pub fn forward_conv_mat(&self, gpu_instance: &GPUInstance){
         let mut encoder = gpu_instance.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("encoder") });
@@ -543,14 +676,14 @@ impl ConvDispatch{
 
             
             let layer_i = 0;
-            for layer_i in 0..(self.conv_info.n_layers - 1){
+            // for layer_i in 0..(self.conv_info.n_layers - 1){
                 {
                     let dyn_off = layer_i as u32 * self.forward_mat_pass_info.dir_slot_size as u32;
                     pass.set_pipeline(&self.forward_mat_pass_info.pipeline);
                     pass.set_bind_group(0, &self.forward_mat_pass_info.bind_group, &[dyn_off]);
                     
                     let gx = ceil_div(self.conv_info.conv_layers[layer_i].n_kernals, self.forward_mat_pass_info.workgroup_dim.x);
-                    let gy = ceil_div(self.conv_info.activity_info.dim[layer_i].tens_length, self.forward_mat_pass_info.workgroup_dim.y);
+                    let gy = ceil_div(self.conv_info.conv_layers[layer_i].layer_size_2d * self.conv_info.n_batches, self.forward_mat_pass_info.workgroup_dim.y);
                     
                     pass.dispatch_workgroups(gx as u32, gy as u32, 1);
                 }
@@ -566,15 +699,11 @@ impl ConvDispatch{
 
                     pass.dispatch_workgroups(gx as u32, gy as u32, (self.conv_info.conv_layers[layer_i].n_kernals * self.conv_info.n_batches) as u32);
                 }
-            }
+            // }
         }
 
         let forward_commands = encoder.finish();
         gpu_instance.queue.submit([forward_commands]);  
-    }
-
-    pub fn forward_pool_mat(&self, gpu_instance: &GPUInstance){
-
     }
 
     pub fn set_data(&self, gpu_instance: &GPUInstance){
@@ -603,7 +732,7 @@ impl ConvDispatch{
         // let start_idx = self.conv_info.activity_info.swap_buffer_size;
         // let layer_size = 28;
         let start_idx = 0;
-        let layer_size = 7;
+        let layer_size = 14;
 
         // let start_idx = self.conv_info.activity_info.batch_swap_buffer_size;
         // let layer_size = 14;
@@ -611,7 +740,7 @@ impl ConvDispatch{
         let mut prev_idx = start_idx;
         let mut curr_idx = prev_idx + layer_size;
         
-        while curr_idx <= start_idx + layer_size * 30{
+        while curr_idx <= start_idx + layer_size * 300{
             println!("{} activity buffer: {:?}", (((prev_idx - start_idx) / layer_size )% layer_size), &out[prev_idx..curr_idx]);
             prev_idx += layer_size;
             curr_idx += layer_size;

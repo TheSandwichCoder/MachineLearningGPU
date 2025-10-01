@@ -136,7 +136,7 @@ impl ConvolutionInfo{
             }
 
             
-            let layer_info = ConvLayerInfo::new(vec![prev_x, prev_y, prev_c], vec![kernal_k, kernal_k, prev_c], output_n, pool_k);
+            let layer_info = ConvLayerInfo::new(vec![prev_x, prev_y, prev_c], vec![kernal_k, kernal_k, prev_c], output_n, pool_k, constructor.split_k);
             
             prev_x = temp_x;
             prev_y = temp_y;
@@ -200,16 +200,18 @@ impl ConvolutionInfo{
 #[derive (Clone)]
 pub struct ConvLayerInfo{
     pub layer_dim: Vec<usize>,
-    pub layer_offset: Vec<usize>,
+    pub layer_offset: Vec<i32>,
 
     pub layer_size_2d: usize,
+    pub acc_length: usize,
+
     pub n_kernals: usize,
     pub kernal_info: KernalInfo,
     pub pooling_info: PoolingInfo,
 }
 
 impl ConvLayerInfo{
-    pub fn new(layer_dim: Vec<usize>, kernal_dim: Vec<usize>, n_kernals: usize, pool_size: usize) -> Self{
+    pub fn new(layer_dim: Vec<usize>, kernal_dim: Vec<usize>, n_kernals: usize, pool_size: usize, split_k: usize) -> Self{
 
         let mut size = 0;
 
@@ -217,12 +219,17 @@ impl ConvLayerInfo{
 
         let pooling_info = PoolingInfo::new(&layer_dim, pool_size);
         let layer_size_2d = layer_dim[0] * layer_dim[1];
+        let acc_length = ceil_div(layer_size_2d, split_k);
+
+        let layer_offset = vec![-(floor_div(layer_dim[0], 2) as i32), -(floor_div(layer_dim[1], 2) as i32), 0];
 
         return ConvLayerInfo{
             layer_dim: layer_dim,
-            layer_offset: Vec::new(),
+            layer_offset: layer_offset,
             
             layer_size_2d: layer_size_2d,
+            acc_length: acc_length,
+            
             n_kernals: n_kernals,
             kernal_info: kernal_info,
             pooling_info: pooling_info,
@@ -312,7 +319,7 @@ impl ConvActivityInfo{
         let mut layer_dim = Vec::new();
 
         let swap_buffer_size = largest_layer * n_batches;
-        
+        println!("asdkjfhsdakjfh {}", largest_layer);
         // swap buffer
         t_length += swap_buffer_size * 2;
         
@@ -326,10 +333,12 @@ impl ConvActivityInfo{
             let mut reversed = layer.layer_dim.clone();
             reversed.reverse(); 
             let tens_info = TensorInfo::new(&reversed);
-            stride_offset += tens_info.tens_length * n_batches;
+            let temp_stride_increment = tens_info.tens_length * n_batches;
             
             strides.push(stride_offset);
             layer_dim.push(tens_info);
+            
+            stride_offset += temp_stride_increment;
         }
 
         t_length += stride_offset;
@@ -392,6 +401,7 @@ pub struct ConvParamInfo{
     pub b_offset: usize,
     pub split_k: usize,
     pub largest_layer: usize,
+    pub acc_buffer_batch_length: usize,
 
     pub size: usize,
 }
@@ -425,6 +435,8 @@ impl ConvParamInfo{
             layer_dim.push(tens_info);
         }
 
+        let acc_buffer_batch_length = largest_layer * ceil_div(largest_layer, split_k);
+
         t_size += k_stride_offset;
         b_offset = t_size;
 
@@ -439,6 +451,7 @@ impl ConvParamInfo{
             b_offset: b_offset,
             split_k: split_k,
             largest_layer: largest_layer,
+            acc_buffer_batch_length: acc_buffer_batch_length,
 
             size: t_size,
         }
@@ -468,14 +481,12 @@ impl ConvParamInfo{
         // return random_floats;
     }
     
-    pub fn create_accumulate_buffer_empty(&self) -> Vec<f32>{
-        let n_split_k = ceil_div(self.largest_layer, self.split_k); 
-
-        return vec![0.0; self.largest_layer * n_split_k];
+    pub fn create_accumulate_buffer_empty(&self, n_batches: usize) -> Vec<f32>{
+        return vec![0.0; self.acc_buffer_batch_length * n_batches];
     }
 
-    pub fn create_buffer_empty(&self) -> Vec<f32>{
-        return vec![0.0; self.size];
+    pub fn create_buffer_empty(&self, n_batches: usize) -> Vec<f32>{
+        return vec![0.0; self.size * n_batches];
     }
 }
 
