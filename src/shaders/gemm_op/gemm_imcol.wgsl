@@ -18,8 +18,8 @@ struct MatrixDir{
     k: u32
 }
 
-@group(0) @binding(0) var<storage, read> read_buffer1: array<f32>;
-@group(0) @binding(1) var<storage, read_write> read_buffer2: array<f32>;
+@group(0) @binding(0) var<storage, read> param_buffer: array<f32>;
+@group(0) @binding(1) var<storage, read_write> swap_buffer: array<f32>;
 
 @group(0) @binding(2) var <uniform> mat_dir: MatrixDir;
 
@@ -53,6 +53,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
     let batch_i = g_m / mat_dir.n_outputs;
 
     let batch_buffer_offset = u32(batch_i * mat_dir.batch_swap_buffer_size);
+    
 
     var v = 0.0;
 
@@ -77,7 +78,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
         if (g_n < mat_dir.n && l_m_i < mat_dir.k){
             let read_idx = kernal_i_offset + l_m_i;
 
-            a_sub[t_n][t_m] = read_buffer1[mat_dir.kernal_read_start + read_idx];
+            a_sub[t_n][t_m] = param_buffer[mat_dir.kernal_read_start + read_idx];
         }
         if (g_m < mat_dir.m && l_n_i < mat_dir.k){
             let rel_kernal_pos = expand(l_n_i, mat_dir.kernal_dim.xyz);
@@ -90,7 +91,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
                 b_sub[t_n][t_m] = 0.0;
             }
             else{
-                b_sub[t_n][t_m] = read_buffer2[mat_dir.layer_read_start + u32(read_idx) + batch_buffer_offset];
+                b_sub[t_n][t_m] = swap_buffer[mat_dir.layer_read_start + u32(read_idx) + batch_buffer_offset];
             }
         }    
         
@@ -118,7 +119,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
 
         let write_idx = g_n * mat_dir.n_outputs + batch_g_m;
 
-        read_buffer2[mat_dir.write_start + u32(write_idx) + batch_buffer_offset] = v;
+        swap_buffer[mat_dir.write_start + u32(write_idx) + batch_buffer_offset] = v;
     }
 }
 

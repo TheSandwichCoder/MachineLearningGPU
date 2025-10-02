@@ -105,8 +105,8 @@ impl Im2ColDir_BG{
             o_layer_dim: [next_conv_layer.layer_dim[0] as u32, next_conv_layer.layer_dim[1] as u32, next_conv_layer.layer_dim[2] as u32, 0],
             i_layer_dim: [curr_conv_layer.layer_dim[0] as u32, curr_conv_layer.layer_dim[1] as u32, curr_conv_layer.layer_dim[2] as u32, 0],
 
-            deriv_read_start: conv_info.activity_info.d_start as u32,
-            input_read_start: (conv_info.activity_info.s_start + conv_info.activity_info.strides[dir_i]) as u32,
+            deriv_read_start: 0 as u32,
+            input_read_start: conv_info.activity_info.strides[dir_i] as u32,
             write_start: 0,
 
             c_start: 0,

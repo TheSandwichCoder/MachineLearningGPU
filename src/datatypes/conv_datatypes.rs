@@ -301,34 +301,25 @@ pub struct ConvActivityInfo{
     pub strides: Vec<usize>,
 
     pub batch_swap_buffer_size: usize,
-
     pub swap_buffer_size: usize,
     pub deriv_buffer_size: usize,
 
     pub size: usize,
-
-    pub s_start: usize, // pre activation storage
-    pub d_start: usize, // derivative ping pong
 }
 
 impl ConvActivityInfo{
     pub fn new(layer_info: &Vec<ConvLayerInfo>, n_batches: usize) -> Self{
         let largest_layer = get_layer_max(layer_info);
 
-        let mut t_length = 0;
         let mut layer_dim = Vec::new();
-
+        
         let swap_buffer_size = largest_layer * n_batches;
         println!("asdkjfhsdakjfh {}", largest_layer);
-        // swap buffer
-        t_length += swap_buffer_size * 2;
-        
         // storage buffer
-        let s_start = t_length;
-
         let mut stride_offset = 0;
         let mut strides = Vec::new();
-
+        
+        let mut t_length = 0;
         for layer in layer_info{
             let mut reversed = layer.layer_dim.clone();
             reversed.reverse(); 
@@ -343,11 +334,6 @@ impl ConvActivityInfo{
 
         t_length += stride_offset;
 
-        // derivative buffer
-        let d_start = t_length;
-
-        t_length += swap_buffer_size * 2;
-
         return ConvActivityInfo{
             offset: 0,
             n_batches,
@@ -360,10 +346,21 @@ impl ConvActivityInfo{
             deriv_buffer_size: swap_buffer_size,
 
             size: t_length,
-
-            s_start: s_start,
-            d_start: d_start,
         }
+    }
+
+    pub fn create_output_swap_buffer(&self) -> Vec<f32>{
+        let mut empty = vec![0.0; self.swap_buffer_size * 2];
+
+        for i in 0..self.swap_buffer_size{
+            empty[i] = (i % self.batch_swap_buffer_size + i / self.batch_swap_buffer_size) as f32;
+        }
+
+        return empty;
+    }
+
+    pub fn create_deriv_swap_buffer(&self) -> Vec<f32>{
+        return vec![0.0; self.swap_buffer_size * 2];
     }
 
     pub fn create_buffer(&self) -> Vec<f32>{
@@ -400,7 +397,7 @@ pub struct ConvParamInfo{
 
     pub b_offset: usize,
     pub split_k: usize,
-    pub largest_layer: usize,
+    pub largest_kernal_layer: usize,
     pub acc_buffer_batch_length: usize,
 
     pub size: usize,
@@ -412,7 +409,7 @@ impl ConvParamInfo{
         let mut layer_dim = Vec::new();
         let mut kernal_count = Vec::new();
 
-        let largest_layer = get_layer_max(layer_info);
+        let largest_kernal_layer = get_kernal_max(layer_info);
 
         let mut t_size = 0;
         let mut b_offset = 0;
@@ -435,7 +432,7 @@ impl ConvParamInfo{
             layer_dim.push(tens_info);
         }
 
-        let acc_buffer_batch_length = largest_layer * ceil_div(largest_layer, split_k);
+        let acc_buffer_batch_length = largest_kernal_layer * ceil_div(largest_kernal_layer, split_k);
 
         t_size += k_stride_offset;
         b_offset = t_size;
@@ -450,7 +447,7 @@ impl ConvParamInfo{
 
             b_offset: b_offset,
             split_k: split_k,
-            largest_layer: largest_layer,
+            largest_kernal_layer: largest_kernal_layer,
             acc_buffer_batch_length: acc_buffer_batch_length,
 
             size: t_size,
@@ -504,7 +501,19 @@ fn get_vec_product(vec: &Vec<usize>) -> usize{
 pub fn get_layer_max(layer_info: &Vec<ConvLayerInfo>) -> usize{
     let mut greatest_size = 0;
     for layer in layer_info{
-        let layer_size = get_vec_product(&layer.layer_dim);
+        let layer_size = get_vec_product(&layer.layer_dim) * layer.n_kernals;
+        
+        if layer_size > greatest_size{
+            greatest_size = layer_size;
+        }
+    } 
+    return greatest_size;
+}
+
+pub fn get_kernal_max(layer_info: &Vec<ConvLayerInfo>) -> usize{
+    let mut greatest_size = 0;
+    for layer in layer_info{
+        let layer_size = get_vec_product(&layer.kernal_info.dim) * layer.n_kernals;
         
         if layer_size > greatest_size{
             greatest_size = layer_size;

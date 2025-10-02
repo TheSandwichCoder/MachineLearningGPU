@@ -8,7 +8,7 @@ struct PoolDir{
     batch_swap_buffer_size: u32,
 }
 
-@group(0) @binding(0) var<storage, read_write> act_buffer: array<f32>;
+@group(0) @binding(0) var<storage, read_write> swap_buffer: array<f32>;
 
 @group(0) @binding(1) var <uniform> pool_dir: PoolDir;
 
@@ -23,6 +23,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let channels_i = gid.z % n_channels;
     let batch_i = gid.z / n_channels; 
 
+    let batch_read_offset = pool_dir.batch_swap_buffer_size * batch_i;
+
     let kernal_coord = vec3u(gid.xy * pool_dir.pool_k, channels_i);
 
     if !in_bounds(kernal_coord, pool_dir.i_layer_dim.xyz){
@@ -36,7 +38,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             let read_coord = kernal_coord + vec3u(tx, ty, 0);
 
             if in_bounds(read_coord, pool_dir.i_layer_dim.xyz){
-                let temp_val = act_buffer[pool_dir.read_start + flatten(read_coord, pool_dir.i_layer_dim.xyz)];
+                let temp_val = swap_buffer[pool_dir.read_start + batch_read_offset + flatten(read_coord, pool_dir.i_layer_dim.xyz)];
 
                 if temp_val > max_val{
                     max_val = temp_val;
@@ -45,7 +47,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
 
-    act_buffer[pool_dir.write_start + pool_dir.batch_swap_buffer_size * batch_i + flatten(vec3u(gid.xy, channels_i), pool_dir.o_layer_dim.xyz)] = max_val;
+    swap_buffer[pool_dir.write_start + batch_read_offset + flatten(vec3u(gid.xy, channels_i), pool_dir.o_layer_dim.xyz)] = max_val;
+    // swap_buffer[pool_dir.write_start + pool_dir.batch_swap_buffer_size * batch_i + flatten(vec3u(gid.xy, channels_i), pool_dir.o_layer_dim.xyz)] = f32(batch_i);
 }
 
 fn flatten(v: vec3u, k: vec3u) -> u32{
