@@ -45,7 +45,7 @@ pub struct ConvDispatch{
     param_buffer: wgpu::Buffer, // holds the params for the model
     gradient_buffer: wgpu::Buffer, // holds the param gradients
     momentum_buffer: wgpu::Buffer, // holds the param momentum
-    act_buffer: wgpu::Buffer, // holds intermediate layer outputs and gradients
+    o_storage_buffer: wgpu::Buffer, // holds intermediate layer outputs and gradients
     conv_output_swap_buffer: wgpu::Buffer,
     conv_deriv_swap_buffer: wgpu::Buffer,
     out_buffer: wgpu::Buffer, // retrieves parameters and debug stuff
@@ -104,9 +104,9 @@ impl ConvDispatch{
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
 
-        let act_buffer = gpu_instance.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
-            label: Some("activities buffer"),
-            contents: bytemuck::cast_slice(&conv_info.activity_info.create_buffer()),
+        let o_storage_buffer = gpu_instance.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+            label: Some("o_storage_buffer buffer"),
+            contents: bytemuck::cast_slice(&conv_info.activity_info.create_output_storage_buffer()),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
 
@@ -491,7 +491,7 @@ impl ConvDispatch{
             label: Some("backward gradient bg"),
             layout: &backward_gradient_bind_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: act_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: o_storage_buffer.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: accumulate_buffer.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 2, resource: backward_gradient_dir_binding },
             ],
@@ -595,7 +595,7 @@ impl ConvDispatch{
             layout: &backward_deriv_bind_layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: param_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: act_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: o_storage_buffer.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 2, resource: backward_deriv_dir_binding },
             ],
         });
@@ -640,7 +640,7 @@ impl ConvDispatch{
             param_buffer,
             gradient_buffer,
             momentum_buffer,
-            act_buffer,
+            o_storage_buffer,
             conv_output_swap_buffer,
             conv_deriv_swap_buffer,
             out_buffer,

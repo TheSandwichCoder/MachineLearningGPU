@@ -142,7 +142,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
             write_buffer[mat_dir.w_start + mat_dir.w_stride_length * g_m + g_n] = v;    
         }
         else{
-            write_buffer[mat_dir.w_start + mat_dir.w_stride_length * g_n + g_m] = v;
+            write_buffer[mat_dir.w_start + mat_dir.w_stride_length * g_n + g_m] = v * 0.0625;
         }
 
     }

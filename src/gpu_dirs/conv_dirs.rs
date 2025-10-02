@@ -24,6 +24,9 @@ pub struct Im2ColDir_F{
     layer_read_start: u32,
     write_start: u32,
 
+    storage_write_start: u32,
+    storage_write_skip: u32,
+
     c_start: u32,
 
     n_outputs: u32,
@@ -34,8 +37,6 @@ pub struct Im2ColDir_F{
     k: u32,
 
     _pad1: u32,
-    _pad2: u32,
-    _pad3: u32,
 }
 
 impl Im2ColDir_F{
@@ -50,6 +51,9 @@ impl Im2ColDir_F{
             kernal_read_start: conv_info.param_info.k_strides[dir_i] as u32,
             layer_read_start: 0,
             write_start: conv_info.activity_info.swap_buffer_size as u32,
+ 
+            storage_write_start: conv_info.activity_info.strides[dir_i] as u32,
+            storage_write_skip: conv_info.activity_info.dim[dir_i].tens_length as u32,
 
             c_start: (conv_info.param_info.b_offset + conv_info.param_info.b_strides[dir_i]) as u32,
             n_outputs: conv_layer.layer_size_2d as u32,
@@ -61,8 +65,6 @@ impl Im2ColDir_F{
             k: conv_layer.kernal_info.size as u32,
             
             _pad1: 0,
-            _pad2: 0,
-            _pad3: 0,
         }
     }
 }

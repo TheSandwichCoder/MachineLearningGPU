@@ -89,8 +89,8 @@ impl BasicNNModel{
     }
 
     pub fn debug(&mut self){
-        // self.dispatch.data_reader.load_batch_testing();
-        // self.dispatch.data_reader.load_batch_mnist();
+        // self.nn_dispatch.data_reader.load_batch_testing();
+        // self.nn_dispatch.data_reader.load_batch_mnist();
         self.nn_dispatch.data_reader.load_batch_debug();
 
         self.nn_dispatch.set_data(&self.gpu_instance);
@@ -103,10 +103,10 @@ impl BasicNNModel{
 
         self.nn_dispatch.read_back_act_single(&self.gpu_instance);
 
-        println!("");
-        self.nn_dispatch.read_back_gradients(&self.gpu_instance);
-        println!("");
-        self.nn_dispatch.read_back_params(&self.gpu_instance);
+        // println!("");
+        // self.nn_dispatch.read_back_gradients(&self.gpu_instance);
+        // println!("");
+        // self.nn_dispatch.read_back_params(&self.gpu_instance);
 
     }
 

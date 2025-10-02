@@ -183,8 +183,10 @@ impl ConvolutionInfo{
         
         println!("\nACTIVITY INFO");
         println!("Activity Strides: {:?}", self.activity_info.strides);
-        println!("Ping Pong Buffer length: {} floats", self.activity_info.deriv_buffer_size);
-        println!("Total Buffer Length: {} floats", self.activity_info.size);
+        println!("Deriv Swap Buffer length: {} floats", self.activity_info.deriv_buffer_size * 2);
+        println!("Output Swap Buffer length: {} floats", self.activity_info.swap_buffer_size * 2);
+        println!("Output Storage Buffer length: {} floats", self.activity_info.storage_buffer_size);
+        println!("Total Buffer Length: {} floats", self.activity_info.deriv_buffer_size * 2 + self.activity_info.swap_buffer_size * 2 +self.activity_info.storage_buffer_size);
 
         println!("\nPARAM INFO");
         
@@ -304,7 +306,7 @@ pub struct ConvActivityInfo{
     pub swap_buffer_size: usize,
     pub deriv_buffer_size: usize,
 
-    pub size: usize,
+    pub storage_buffer_size: usize,
 }
 
 impl ConvActivityInfo{
@@ -345,7 +347,7 @@ impl ConvActivityInfo{
             swap_buffer_size: swap_buffer_size,
             deriv_buffer_size: swap_buffer_size,
 
-            size: t_length,
+            storage_buffer_size: t_length,
         }
     }
 
@@ -363,12 +365,11 @@ impl ConvActivityInfo{
         return vec![0.0; self.swap_buffer_size * 2];
     }
 
-    pub fn create_buffer(&self) -> Vec<f32>{
-        let mut empty = vec![0.0; self.size];
-        let largest_layer = self.batch_swap_buffer_size;
+    pub fn create_output_storage_buffer(&self) -> Vec<f32>{
+        let mut empty = vec![0.0; self.storage_buffer_size];
 
-        for i in 0..self.size{
-            empty[i] = (i % largest_layer) as f32;
+        for i in 0..self.storage_buffer_size{
+            empty[i] = 0.0;
         }
 
         // for i in d_start..self.size{

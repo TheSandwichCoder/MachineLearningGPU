@@ -7,6 +7,9 @@ struct MatrixDir{
     layer_read_start: u32,
     write_start: u32,
 
+    storage_write_start: u32,
+    storage_write_skip: u32,
+
     c_start: u32,
 
     // transpose: u32,
@@ -20,8 +23,9 @@ struct MatrixDir{
 
 @group(0) @binding(0) var<storage, read> param_buffer: array<f32>;
 @group(0) @binding(1) var<storage, read_write> swap_buffer: array<f32>;
+@group(0) @binding(2) var<storage, read_write> storage_buffer: array<f32>;
 
-@group(0) @binding(2) var <uniform> mat_dir: MatrixDir;
+@group(0) @binding(3) var <uniform> mat_dir: MatrixDir;
 
 // all the same (I suck at coding)
 const T_K : u32 = 16;
@@ -116,10 +120,11 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
         // v += read_buffer1[mat_dir.c_start + g_n];
 
         // v = ReLu(v);
-
         let write_idx = g_n * mat_dir.n_outputs + batch_g_m;
 
-        swap_buffer[mat_dir.write_start + u32(write_idx) + batch_buffer_offset] = v;
+        storage_buffer[mat_dir.storage_write_start + mat_dir.storage_write_skip * batch_i + write_idx] = v;
+
+        swap_buffer[mat_dir.write_start + batch_buffer_offset + write_idx] = v;
     }
 }
 
