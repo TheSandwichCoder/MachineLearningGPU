@@ -725,7 +725,6 @@ impl ConvDispatch{
             
             let gx = ceil_div(conv_layer.n_kernals, self.backward_gradient_pass_info.workgroup_dim.x);
             let gy = ceil_div(conv_layer.kernal_info.size, self.backward_gradient_pass_info.workgroup_dim.y);
-            // let gy = ceil_div(self.conv_info.activity_info.dim[layer_i].tens_length, self.backward_gradient_pass_info.workgroup_dim.y);
 
             println!("{} {}", gy, conv_layer.acc_length);
             

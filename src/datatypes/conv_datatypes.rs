@@ -224,7 +224,7 @@ impl ConvLayerInfo{
         let layer_size_2d = layer_dim[0] * layer_dim[1];
         let layer_size = layer_dim[0] * layer_dim[1] * layer_dim[2];
         
-        let acc_length = ceil_div(layer_size, split_k);
+        let acc_length = ceil_div(layer_size_2d, split_k);
 
         
         let layer_offset = vec![-(floor_div(layer_dim[0], 2) as i32), -(floor_div(layer_dim[1], 2) as i32), 0];

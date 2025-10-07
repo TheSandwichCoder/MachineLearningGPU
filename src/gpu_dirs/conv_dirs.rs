@@ -120,7 +120,7 @@ impl Im2ColDir_BG{
 
             n: curr_conv_layer.n_kernals as u32,
             m: (curr_conv_layer.kernal_info.size * conv_info.n_batches) as u32,
-            k: curr_conv_layer.layer_size as u32,
+            k: curr_conv_layer.layer_size_2d as u32,
         }
     }
 }
