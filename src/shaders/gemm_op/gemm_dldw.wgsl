@@ -11,7 +11,8 @@ struct MatrixDir{
     c_start: u32,
 
     n_outputs: u32, // number of outputs for a single batch
-    batch_swap_buffer_size: u32, // size of the swap buffer for a single input
+    batch_swap_buffer_size: u32, // size of the swap buffer for a single batch
+    acc_buffer_batch_length: u32, // size of the accumulate buffer for a batch
 
     split_k: u32, // num of values in k slice
     n_k_splits: u32, // num of k slices
@@ -21,10 +22,12 @@ struct MatrixDir{
     k: u32
 }
 
-@group(0) @binding(0) var<storage, read> read_buffer: array<f32>;
-@group(0) @binding(1) var<storage, read_write> write_buffer: array<f32>;
 
-@group(0) @binding(2) var <uniform> mat_dir: MatrixDir;
+@group(0) @binding(0) var<storage, read> input_buffer: array<f32>;
+@group(0) @binding(1) var<storage, read> deriv_buffer: array<f32>;
+@group(0) @binding(2) var<storage, read_write> accumulate_buffer: array<f32>;
+
+@group(0) @binding(3) var <uniform> mat_dir: MatrixDir;
 
 // all the same (I suck at coding)
 const T_K : u32 = 16;
@@ -58,6 +61,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
     let batch_i = g_m / mat_dir.n_outputs;
 
     let batch_buffer_offset = u32(batch_i * mat_dir.batch_swap_buffer_size);
+    let acc_buffer_offset = u32(batch_i * mat_dir.acc_buffer_batch_length);
 
     var v = 0.0;
 
@@ -82,7 +86,9 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
         if (g_n < mat_dir.n && l_m_i < mat_dir.k){
             let read_idx = kernal_i_offset + l_m_i;
 
-            a_sub[t_n][t_m] = read_buffer[mat_dir.deriv_read_start + read_idx];
+            // a_sub[t_n][t_m] = f32(l_m_i) / 100.0 + 1.0;
+            a_sub[t_n][t_m] = deriv_buffer[mat_dir.deriv_read_start + read_idx];
+            // a_sub[t_n][t_m] = 1.0;
         }
         
         if (g_m < mat_dir.m && l_n_i < mat_dir.k){
@@ -96,7 +102,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
                 b_sub[t_n][t_m] = 0.0;
             }
             else{
-                b_sub[t_n][t_m] = read_buffer[mat_dir.input_read_start + u32(read_idx) + batch_buffer_offset];
+                b_sub[t_n][t_m] = input_buffer[mat_dir.input_read_start + u32(read_idx) + batch_buffer_offset];
             }
         }    
         
@@ -108,6 +114,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
 
             for (var i: u32 = 0; i < limit; i++) {
                 v += a_sub[t_n][i] * b_sub[i][t_m];
+                // v += a_sub[t_n][i];
             }
         }
         
@@ -122,11 +129,13 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
 
         // v = ReLu(v);
 
-        let write_idx = g_n * mat_dir.n_outputs + batch_g_m * mat_dir.n_k_splits + wg.z;
+        let write_idx = g_n * mat_dir.n_outputs * mat_dir.n_k_splits + batch_g_m * mat_dir.n_k_splits + wg.z;
+        // let write_idx = g_n * mat_dir.n_k_splits + batch_g_m * mat_dir.n_k_splits + wg.z;
 
-        write_buffer[mat_dir.write_start + u32(write_idx) + batch_buffer_offset] = v;
-    }
-}
+        // accumulate_buffer[write_idx] = 1.0;
+        accumulate_buffer[mat_dir.write_start + acc_buffer_offset + u32(write_idx)] = v;
+        // accumulate_buffer[mat_dir.write_start + acc_buffer_offset + u32(write_idx)] = 1.0;
+    }}
 
 fn expand(i: u32, k: vec3u) -> vec3i{
     let z = i / (k.y * k.x);

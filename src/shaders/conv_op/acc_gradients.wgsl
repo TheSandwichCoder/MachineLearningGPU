@@ -22,7 +22,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     for (var i:u32 = 0; i < acc_dir.acc_length; i += 1){
         let idx = start_idx + i;
 
-        v += read_buffer[idx];
+        v += read_buffer[acc_dir.read_start + idx];
+        // v += 1.0;
     }
 
     write_buffer[acc_dir.write_start + gid.x] = v;

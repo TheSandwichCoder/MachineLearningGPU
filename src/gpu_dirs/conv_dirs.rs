@@ -24,9 +24,6 @@ pub struct Im2ColDir_F{
     layer_read_start: u32,
     write_start: u32,
 
-    storage_write_start: u32,
-    storage_write_skip: u32,
-
     c_start: u32,
 
     n_outputs: u32,
@@ -37,6 +34,8 @@ pub struct Im2ColDir_F{
     k: u32,
 
     _pad1: u32,
+    _pad2: u32,
+    _pad3: u32,
 }
 
 impl Im2ColDir_F{
@@ -52,9 +51,6 @@ impl Im2ColDir_F{
             layer_read_start: 0,
             write_start: conv_info.activity_info.swap_buffer_size as u32,
  
-            storage_write_start: conv_info.activity_info.strides[dir_i] as u32,
-            storage_write_skip: conv_info.activity_info.dim[dir_i].tens_length as u32,
-
             c_start: (conv_info.param_info.b_offset + conv_info.param_info.b_strides[dir_i]) as u32,
             n_outputs: conv_layer.layer_size_2d as u32,
 
@@ -65,6 +61,8 @@ impl Im2ColDir_F{
             k: conv_layer.kernal_info.size as u32,
             
             _pad1: 0,
+            _pad2: 0,
+            _pad3: 0,
         }
     }
 }
@@ -103,8 +101,8 @@ impl Im2ColDir_BG{
 
         return Im2ColDir_BG{
             kernal: [curr_conv_layer.kernal_info.dim[0] as u32, curr_conv_layer.kernal_info.dim[1] as u32, curr_conv_layer.kernal_info.dim[2] as u32, 0],
-            o_layer_offset: [curr_conv_layer.layer_offset[0], curr_conv_layer.layer_offset[1], 0, 0],
-            o_layer_dim: [next_conv_layer.layer_dim[0] as u32, next_conv_layer.layer_dim[1] as u32, next_conv_layer.layer_dim[2] as u32, 0],
+            o_layer_offset: [curr_conv_layer.kernal_info.k_range.start_idx, curr_conv_layer.kernal_info.k_range.start_idx, 0, 0],
+            o_layer_dim: [curr_conv_layer.layer_dim[0] as u32, curr_conv_layer.layer_dim[1] as u32, curr_conv_layer.layer_dim[2] as u32, 0],
             i_layer_dim: [curr_conv_layer.layer_dim[0] as u32, curr_conv_layer.layer_dim[1] as u32, curr_conv_layer.layer_dim[2] as u32, 0],
 
             deriv_read_start: 0 as u32,
@@ -122,7 +120,7 @@ impl Im2ColDir_BG{
 
             n: curr_conv_layer.n_kernals as u32,
             m: (curr_conv_layer.kernal_info.size * conv_info.n_batches) as u32,
-            k: curr_conv_layer.layer_size_2d as u32,
+            k: curr_conv_layer.layer_size as u32,
         }
     }
 }
@@ -190,6 +188,11 @@ pub struct PoolDir{
     write_start: u32,
     pool_k: u32,
     batch_swap_buffer_size: u32,
+    
+    storage_write_start: u32,
+    storage_write_skip: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
 impl PoolDir{
@@ -197,7 +200,7 @@ impl PoolDir{
         let conv_layer = &conv_info.conv_layers[dir_i];
         let next_conv_layer = &conv_info.conv_layers[dir_i + 1];
 
-        println!("{:?}", &next_conv_layer.layer_dim);
+        // println!("{}", conv_info.activity_info.dim[dir_i].tens_length);
 
         return PoolDir{
             i_layer_dim: [conv_layer.layer_dim[0] as u32, conv_layer.layer_dim[1] as u32, next_conv_layer.layer_dim[2] as u32, 0],
@@ -208,6 +211,12 @@ impl PoolDir{
 
             pool_k: conv_layer.pooling_info.k as u32,
             batch_swap_buffer_size: conv_info.activity_info.batch_swap_buffer_size as u32,
+
+            storage_write_start: conv_info.activity_info.strides[dir_i + 1] as u32,
+            storage_write_skip: conv_info.activity_info.dim[dir_i + 1].tens_length as u32,
+
+            _pad1: 0,
+            _pad2: 0,
         }
     }
 }
@@ -218,7 +227,7 @@ pub struct AccDir{
     read_start: u32,
     write_start: u32,
     acc_length: u32,
-    _pad1: u32,
+    n_weights: u32,
 }
 
 impl AccDir{
@@ -229,7 +238,7 @@ impl AccDir{
             read_start: 0,
             write_start: conv_info.activity_info.strides[dir_i] as u32,
             acc_length: conv_layer.acc_length as u32,
-            _pad1: 0,
+            n_weights: (conv_layer.n_kernals * conv_layer.kernal_info.size) as u32,
         }
     }
 }

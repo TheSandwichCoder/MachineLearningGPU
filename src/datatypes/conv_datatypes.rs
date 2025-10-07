@@ -205,6 +205,7 @@ pub struct ConvLayerInfo{
     pub layer_offset: Vec<i32>,
 
     pub layer_size_2d: usize,
+    pub layer_size: usize,
     pub acc_length: usize,
 
     pub n_kernals: usize,
@@ -221,8 +222,11 @@ impl ConvLayerInfo{
 
         let pooling_info = PoolingInfo::new(&layer_dim, pool_size);
         let layer_size_2d = layer_dim[0] * layer_dim[1];
-        let acc_length = ceil_div(layer_size_2d, split_k);
+        let layer_size = layer_dim[0] * layer_dim[1] * layer_dim[2];
+        
+        let acc_length = ceil_div(layer_size, split_k);
 
+        
         let layer_offset = vec![-(floor_div(layer_dim[0], 2) as i32), -(floor_div(layer_dim[1], 2) as i32), 0];
 
         return ConvLayerInfo{
@@ -230,6 +234,7 @@ impl ConvLayerInfo{
             layer_offset: layer_offset,
             
             layer_size_2d: layer_size_2d,
+            layer_size: layer_size,
             acc_length: acc_length,
             
             n_kernals: n_kernals,
@@ -262,6 +267,7 @@ pub struct KernalInfo{
     pub tens: TensorInfo,
     pub k_range: KernalRange,
     pub size: usize,
+    pub size_2d: usize,
 }
 
 impl KernalInfo{
@@ -282,6 +288,7 @@ impl KernalInfo{
             tens: tens,
             k_range: k_range,
             size: size,
+            size_2d: k * k,
         }
     }
 }
@@ -355,21 +362,30 @@ impl ConvActivityInfo{
         let mut empty = vec![0.0; self.swap_buffer_size * 2];
 
         for i in 0..self.swap_buffer_size{
-            empty[i] = (i % self.batch_swap_buffer_size + i / self.batch_swap_buffer_size) as f32;
+            // empty[i] = (i % self.batch_swap_buffer_size + i / self.batch_swap_buffer_size) as f32;
+            empty[i] = 1.0;
         }
 
         return empty;
     }
 
     pub fn create_deriv_swap_buffer(&self) -> Vec<f32>{
-        return vec![0.0; self.swap_buffer_size * 2];
+        // return vec![1.0; self.swap_buffer_size * 2];
+        let mut empty_vec = vec![0.0; self.swap_buffer_size * 2];
+
+        for i in 0..self.swap_buffer_size * 2{
+            empty_vec[i] = 1.0 + i as f32 * 0.01;
+        }
+
+        return empty_vec
+
     }
 
     pub fn create_output_storage_buffer(&self) -> Vec<f32>{
-        let mut empty = vec![0.0; self.storage_buffer_size];
+        let mut empty = vec![1.0; self.storage_buffer_size];
 
         for i in 0..self.storage_buffer_size{
-            empty[i] = 0.0;
+            empty[i] = i as f32;
         }
 
         // for i in d_start..self.size{
