@@ -70,7 +70,8 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
     
     let glob_kernal_pos = expand(batch_g_m, mat_dir.kernal_dim.xyz);
 
-    let kernal_i_offset = g_n * mat_dir.k;
+    // look into this
+    let layer_i_offset = g_n * mat_dir.k;
     
     loop{
         if k_i >= mat_dir.k || k_i >= k_stop{
@@ -84,7 +85,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
         // assignment for forward
 
         if (g_n < mat_dir.n && l_m_i < mat_dir.k){
-            let read_idx = kernal_i_offset + l_m_i;
+            let read_idx = layer_i_offset + l_m_i;
 
             // a_sub[t_n][t_m] = f32(l_m_i) / 100.0 + 1.0;
             a_sub[t_n][t_m] = deriv_buffer[mat_dir.deriv_read_start + read_idx];

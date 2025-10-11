@@ -1,20 +1,26 @@
-use std::num::NonZeroU64;
-use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
+use std::num::NonZeroU64;
 use std::time::Instant;
+use wgpu::util::DeviceExt;
 
-mod dispatch;
 mod data_reader;
-mod model;
-mod gpu_dirs;
-mod functions;
 mod datatypes;
+mod dispatch;
+mod functions;
+mod gpu_dirs;
+mod model;
 
 use crate::datatypes::*;
 use crate::dispatch::{conv_dispatch::*, gpu_instance::GPUInstance};
 use crate::model::*;
 
 use crate::conv_datatypes::*;
+
+// TODO
+// batch backward gradient prop
+// test backward gradient prop with layer > 1
+// batch the backward
+// get everything to work with the relu and biases
 
 fn main() {
     // pollster::block_on(run()););
@@ -32,10 +38,11 @@ fn main() {
     let mut conv_dispatch = ConvDispatch::new(&gpu_instance, conv_construct);
 
     conv_dispatch.conv_info.show_all_specs();
-    
+
     // conv_dispatch.forward_conv_mat(&gpu_instance);
-    conv_dispatch.backward_conv_mat(&gpu_instance);
-    conv_dispatch.accumulate_gradients(&gpu_instance);
+    // conv_dispatch.backward_conv_mat(&gpu_instance);
+    // conv_dispatch.accumulate_gradients(&gpu_instance);
+    conv_dispatch.backward_conv_mat_deriv(&gpu_instance);
     conv_dispatch.read_back_act_single(&gpu_instance);
 
     // constructor.set_nn_dim(&vec![2, 17, 2]);
@@ -50,19 +57,16 @@ fn main() {
     // constructor.set_lr(0.00004);
     // constructor.set_mr(0.9);
 
-    // let mut nn_model = BasicNNModel::construct(&constructor); 
+    // let mut nn_model = BasicNNModel::construct(&constructor);
 
     // nn_model.show_all_specs();
 
-    
     // nn_model.debug();
     // nn_model.test();
-    
+
     // // nn_model.show_params();
     // nn_model.train();
     // nn_model.test();
 
     // nn_model.save();
-
-
 }
