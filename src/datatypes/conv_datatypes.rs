@@ -140,6 +140,7 @@ impl ConvolutionInfo {
                 output_n,
                 pool_k,
                 constructor.split_k,
+                constructor.n_batches,
             );
 
             prev_x = temp_x;
@@ -243,6 +244,7 @@ impl ConvLayerInfo {
         n_kernals: usize,
         pool_size: usize,
         split_k: usize,
+        n_batches: usize,
     ) -> Self {
         let mut size = 0;
 
@@ -252,7 +254,7 @@ impl ConvLayerInfo {
         let layer_size_2d = layer_dim[0] * layer_dim[1];
         let layer_size = layer_dim[0] * layer_dim[1] * layer_dim[2];
 
-        let acc_length = ceil_div(layer_size_2d, split_k);
+        let acc_length = ceil_div(layer_size_2d * n_batches, split_k);
 
         let layer_offset = vec![
             -(floor_div(layer_dim[0], 2) as i32),

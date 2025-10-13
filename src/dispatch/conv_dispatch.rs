@@ -1210,13 +1210,13 @@ impl ConvDispatch {
                 self.backward_deriv_pass_info.workgroup_dim.x,
             );
             let gy = ceil_div(
-                conv_layer.layer_size_2d * conv_layer.n_kernals,
+                conv_layer.layer_size_2d * self.conv_info.n_batches,
                 self.backward_deriv_pass_info.workgroup_dim.y,
             );
 
             println!("{} {}", gy, conv_layer.acc_length);
 
-            pass.dispatch_workgroups(gx as u32, gy as u32, conv_layer.acc_length as u32);
+            pass.dispatch_workgroups(gx as u32, gy as u32, 1 as u32);
         }
 
         let backward_commands = encoder.finish();
@@ -1318,7 +1318,9 @@ impl ConvDispatch {
         let out: &[f32] = bytemuck::cast_slice(&data);
 
         // let start_idx = 0;
-        let start_idx = self.conv_info.activity_info.deriv_buffer_size;
+        let start_idx = self.conv_info.activity_info.deriv_buffer_size
+            + self.conv_info.activity_info.batch_swap_buffer_size;
+
         // let start_idx = self.conv_info.activity_info.strides[1];
 
         let layer_size = 28;

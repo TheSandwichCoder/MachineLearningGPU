@@ -93,7 +93,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
         if (g_m < mat_dir.m && l_n_i < mat_dir.k){
             let rel_kernal_pos = expand(layer_value_i, mat_dir.kernal_dim.xyz);
             
-            let read_pos = rel_kernal_pos + glob_kernal_pos + vec3i(0, 0, i32(layer_i)) + mat_dir.kernal_offset.xyz;
+            let read_pos = glob_kernal_pos + rel_kernal_pos + vec3i(0, 0, i32(layer_i)) + mat_dir.kernal_offset.xyz;
             // let read_pos = glob_kernal_pos + rel_kernal_pos + mat_dir.kernal_offset.xyz;
 
             let read_idx = flatten_safe(read_pos, vec3i(mat_dir.o_layer_dim.xyz));

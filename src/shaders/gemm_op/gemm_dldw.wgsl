@@ -16,6 +16,7 @@ struct MatrixDir{
 
     split_k: u32, // num of values in k slice
     n_k_splits: u32, // num of k slices
+    batch_k_length: u32, // length of a k batch length
 
     n: u32,
     m: u32,

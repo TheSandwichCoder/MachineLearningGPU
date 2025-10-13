@@ -103,10 +103,15 @@ pub struct Im2ColDir_BG {
 
     split_k: u32,
     n_k_splits: u32,
+    batch_k_length: u32,
 
     n: u32,
     m: u32,
     k: u32,
+
+    _pad1: u32,
+    _pad2: u32,
+    _pad3: u32,
 }
 
 impl Im2ColDir_BG {
@@ -152,10 +157,15 @@ impl Im2ColDir_BG {
 
             split_k: conv_info.split_k as u32,
             n_k_splits: curr_conv_layer.acc_length as u32,
+            batch_k_length: curr_conv_layer.layer_size_2d as u32,
 
             n: curr_conv_layer.n_kernals as u32,
-            m: (curr_conv_layer.kernal_info.size * conv_info.n_batches) as u32, // TODO: why is the n batches here?
-            k: curr_conv_layer.layer_size_2d as u32,
+            m: curr_conv_layer.kernal_info.size as u32,
+            k: (curr_conv_layer.layer_size_2d * conv_info.n_batches) as u32,
+
+            _pad1: 0,
+            _pad2: 0,
+            _pad3: 0,
         };
     }
 }
@@ -226,7 +236,7 @@ impl Im2ColDir_BD {
 
             c_start: 0,
 
-            n_outputs: curr_conv_layer.layer_size_2d as u32,
+            n_outputs: (curr_conv_layer.layer_size_2d) as u32,
             batch_swap_buffer_size: conv_info.activity_info.batch_swap_buffer_size as u32,
 
             kernal_layer_size: curr_kernal.size_2d as u32,
