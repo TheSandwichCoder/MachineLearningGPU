@@ -406,7 +406,9 @@ impl ConvActivityInfo {
         let mut empty_vec = vec![0.0; self.swap_buffer_size * 2];
 
         for i in 0..self.swap_buffer_size * 2 {
-            empty_vec[i] = 1.0 + i as f32 * 0.01;
+            // empty_vec[i] = 1.0 + (i) as f32 * 0.01;
+            empty_vec[i] = 1.0 + (i % self.batch_swap_buffer_size) as f32 * 0.01;
+
             // empty_vec[i] = 1.0;
         }
 
@@ -416,8 +418,11 @@ impl ConvActivityInfo {
     pub fn create_output_storage_buffer(&self) -> Vec<f32> {
         let mut empty = vec![1.0; self.storage_buffer_size];
 
+        // println!("asjkghkjdsafhksajdf {}", self.dim[0].tens_length);
+
         for i in 0..self.storage_buffer_size {
-            empty[i] = i as f32;
+            empty[i] = (i % 784) as f32;
+            // empty[i] = 1 as f32;
         }
 
         // for i in d_start..self.size{

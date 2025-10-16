@@ -99,6 +99,7 @@ pub struct Im2ColDir_BG {
 
     n_outputs: u32,
     batch_swap_buffer_size: u32,
+    batch_input_buffer_size: u32,
     acc_buffer_batch_length: u32,
 
     split_k: u32,
@@ -111,7 +112,6 @@ pub struct Im2ColDir_BG {
 
     _pad1: u32,
     _pad2: u32,
-    _pad3: u32,
 }
 
 impl Im2ColDir_BG {
@@ -153,6 +153,7 @@ impl Im2ColDir_BG {
 
             n_outputs: curr_conv_layer.kernal_info.size as u32,
             batch_swap_buffer_size: conv_info.activity_info.batch_swap_buffer_size as u32,
+            batch_input_buffer_size: conv_info.activity_info.dim[dir_i].tens_length as u32,
             acc_buffer_batch_length: conv_info.param_info.acc_buffer_batch_length as u32,
 
             split_k: conv_info.split_k as u32,
@@ -165,7 +166,6 @@ impl Im2ColDir_BG {
 
             _pad1: 0,
             _pad2: 0,
-            _pad3: 0,
         };
     }
 }

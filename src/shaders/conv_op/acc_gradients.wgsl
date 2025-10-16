@@ -27,4 +27,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     write_buffer[acc_dir.write_start + gid.x] = v;
+    // write_buffer[acc_dir.write_start + gid.x] = 1.0;
 }

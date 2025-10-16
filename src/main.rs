@@ -42,7 +42,9 @@ fn main() {
     // conv_dispatch.forward_conv_mat(&gpu_instance);
     // conv_dispatch.backward_conv_mat(&gpu_instance);
     // conv_dispatch.accumulate_gradients(&gpu_instance);
-    conv_dispatch.backward_conv_mat_deriv(&gpu_instance);
+    conv_dispatch.backward_conv_mat(&gpu_instance);
+    conv_dispatch.accumulate_gradients(&gpu_instance);
+    // conv_dispatch.backward_conv_mat_deriv(&gpu_instance);
     conv_dispatch.read_back_act_single(&gpu_instance);
 
     // constructor.set_nn_dim(&vec![2, 17, 2]);

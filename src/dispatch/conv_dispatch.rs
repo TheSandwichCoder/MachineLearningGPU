@@ -92,11 +92,7 @@ impl ConvDispatch {
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("cgradient buffer"),
-                    contents: bytemuck::cast_slice(
-                        &conv_info
-                            .param_info
-                            .create_buffer_empty(conv_info.n_batches),
-                    ),
+                    contents: bytemuck::cast_slice(&conv_info.param_info.create_buffer_empty(1)),
                     usage: wgpu::BufferUsages::STORAGE
                         | wgpu::BufferUsages::COPY_DST
                         | wgpu::BufferUsages::COPY_SRC,
@@ -1297,12 +1293,20 @@ impl ConvDispatch {
                 });
 
         // encoder.copy_buffer_to_buffer(&self.accumulate_buffer, 0, &self.out_buffer, 0, 30000 as u64 * 4);
+        // encoder.copy_buffer_to_buffer(
+        //     &self.conv_deriv_swap_buffer,
+        //     0,
+        //     &self.out_buffer,
+        //     0,
+        //     self.conv_info.activity_info.deriv_buffer_size as u64 * 4 * 2,
+        // );
+
         encoder.copy_buffer_to_buffer(
-            &self.conv_deriv_swap_buffer,
+            &self.gradient_buffer,
             0,
             &self.out_buffer,
             0,
-            self.conv_info.activity_info.deriv_buffer_size as u64 * 4 * 2,
+            self.conv_info.param_info.size as u64 * 4,
         );
 
         // encoder.copy_buffer_to_buffer(&self.conv_output_swap_buffer, 0, &self.out_buffer, 0, self.conv_info.activity_info.swap_buffer_size as u64 * 4 * 2);
@@ -1318,12 +1322,11 @@ impl ConvDispatch {
         let out: &[f32] = bytemuck::cast_slice(&data);
 
         // let start_idx = 0;
-        let start_idx = self.conv_info.activity_info.deriv_buffer_size
-            + self.conv_info.activity_info.batch_swap_buffer_size;
+        let start_idx = 0;
 
         // let start_idx = self.conv_info.activity_info.strides[1];
 
-        let layer_size = 28;
+        let layer_size = 8;
         let check_n_layers = 30;
 
         let mut prev_idx = start_idx;
