@@ -72,7 +72,6 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
     
     let glob_kernal_pos = expand(g_m, mat_dir.kernal_dim.xyz);
 
-    // look into this
     let layer_i_offset = g_n * mat_dir.batch_k_length;
     
     loop{

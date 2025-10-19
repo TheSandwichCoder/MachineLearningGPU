@@ -349,7 +349,7 @@ impl AccDir {
 
         return AccDir {
             read_start: 0,
-            write_start: conv_info.activity_info.strides[dir_i] as u32,
+            write_start: conv_info.param_info.k_strides[dir_i] as u32,
             acc_length: conv_layer.acc_length as u32,
             n_weights: (conv_layer.n_kernals * conv_layer.kernal_info.size) as u32,
         };

@@ -17,10 +17,9 @@ use crate::model::*;
 use crate::conv_datatypes::*;
 
 // TODO
-// batch backward gradient prop
 // test backward gradient prop with layer > 1
-// batch the backward
 // get everything to work with the relu and biases
+// integrate both of them together
 
 fn main() {
     // pollster::block_on(run()););
@@ -32,7 +31,7 @@ fn main() {
     conv_construct.set_pool(vec![2, 2]);
     conv_construct.set_kernal(vec![8, 4]);
     conv_construct.set_outputs(vec![10, 1]);
-    conv_construct.set_n_batches(16);
+    conv_construct.set_n_batches(1);
 
     let gpu_instance = pollster::block_on(GPUInstance::new());
     let mut conv_dispatch = ConvDispatch::new(&gpu_instance, conv_construct);
@@ -42,9 +41,8 @@ fn main() {
     // conv_dispatch.forward_conv_mat(&gpu_instance);
     // conv_dispatch.backward_conv_mat(&gpu_instance);
     // conv_dispatch.accumulate_gradients(&gpu_instance);
-    conv_dispatch.backward_conv_mat(&gpu_instance);
-    conv_dispatch.accumulate_gradients(&gpu_instance);
     // conv_dispatch.backward_conv_mat_deriv(&gpu_instance);
+    conv_dispatch.backward_conv_full(&gpu_instance);
     conv_dispatch.read_back_act_single(&gpu_instance);
 
     // constructor.set_nn_dim(&vec![2, 17, 2]);

@@ -41,7 +41,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             let write_coord = kernal_coord + vec3u(tx, ty, 0);
 
             if in_bounds(write_coord, pool_dir.i_layer_dim.xyz){
-                deriv_swap_buffer[pool_dir.read_start + batch_read_offset + flatten(write_coord, pool_dir.i_layer_dim.xyz)] = 0.0;
+                deriv_swap_buffer[pool_dir.write_start + batch_read_offset + flatten(write_coord, pool_dir.i_layer_dim.xyz)] = 0.0;
             }
         }
     }
@@ -57,7 +57,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let write_idx = flatten(write_coord, pool_dir.i_layer_dim.xyz);
 
     let v = deriv_swap_buffer[pool_dir.read_start + batch_read_offset + read_idx];
-
 
     deriv_swap_buffer[pool_dir.write_start + batch_read_offset + write_idx] = v;
 }
