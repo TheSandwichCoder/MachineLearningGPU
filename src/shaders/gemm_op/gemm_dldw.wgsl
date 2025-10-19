@@ -114,8 +114,8 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
                 b_sub[t_n][t_m] = 0.0;
             }
             else{
-                b_sub[t_n][t_m] = input_buffer[mat_dir.input_read_start + u32(read_idx) + batch_input_read_offset];
-                // b_sub[t_n][t_m] = 1.0;
+                // b_sub[t_n][t_m] = input_buffer[mat_dir.input_read_start + u32(read_idx) + batch_input_read_offset];
+                b_sub[t_n][t_m] = 1.0;
             }
         }    
         

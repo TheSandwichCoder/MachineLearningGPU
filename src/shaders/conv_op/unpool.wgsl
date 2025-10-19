@@ -46,7 +46,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
 
-    let pool_idx = pool_idx_storage_buffer[pool_dir.storage_read_start + storage_batch_offset + flatten(kernal_coord, pool_dir.o_layer_dim.xyz)];
+    let pool_idx = pool_idx_storage_buffer[pool_dir.storage_read_start + storage_batch_offset + flatten(vec3u(gid.xy, channels_i), pool_dir.o_layer_dim.xyz)];
 
     let pool_x = pool_idx % pool_dir.pool_k;
     let pool_y = pool_idx / pool_dir.pool_k;

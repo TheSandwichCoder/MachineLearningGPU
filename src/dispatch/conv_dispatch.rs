@@ -1396,13 +1396,28 @@ impl ConvDispatch {
                 });
 
         // encoder.copy_buffer_to_buffer(&self.accumulate_buffer, 0, &self.out_buffer, 0, 30000 as u64 * 4);
-        encoder.copy_buffer_to_buffer(
-            &self.conv_deriv_swap_buffer,
-            0,
-            &self.out_buffer,
-            0,
-            self.conv_info.activity_info.deriv_buffer_size as u64 * 4 * 2,
-        );
+        // encoder.copy_buffer_to_buffer(
+        //     &self.pool_idx_storage_buffer,
+        //     0,
+        //     &self.out_buffer,
+        //     0,
+        //     self.conv_info.activity_info.storage_buffer_size as u64 * 4,
+        // );
+        // encoder.copy_buffer_to_buffer(
+        //     &self.conv_deriv_swap_buffer,
+        //     0,
+        //     &self.out_buffer,
+        //     0,
+        //     self.conv_info.activity_info.deriv_buffer_size as u64 * 4 * 2,
+        // );
+
+        // encoder.copy_buffer_to_buffer(
+        //     &self.o_storage_buffer,
+        //     0,
+        //     &self.out_buffer,
+        //     0,
+        //     self.conv_info.activity_info.storage_buffer_size as u64 * 4,
+        // );
 
         encoder.copy_buffer_to_buffer(
             &self.gradient_buffer,
@@ -1429,11 +1444,15 @@ impl ConvDispatch {
 
         // Now it's safe to read.
         let data = slice.get_mapped_range();
+        // let out: &[f32] = bytemuck::cast_slice(&data);
         let out: &[f32] = bytemuck::cast_slice(&data);
 
+        // let start_idx = self.conv_info.activity_info.strides[1];
+        // let start_idx = self.conv_info.activity_info.strides[2];
         // let start_idx = 0;
         let start_idx = self.conv_info.param_info.k_strides[1];
 
+        // let layer_size = 14;
         let layer_size = 4;
         let check_n_layers = 30;
 

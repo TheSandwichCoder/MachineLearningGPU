@@ -119,6 +119,8 @@ impl Im2ColDir_BG {
         let curr_conv_layer = &conv_info.conv_layers[dir_i];
         let next_conv_layer = &conv_info.conv_layers[dir_i + 1];
 
+        println!("{:?}", &curr_conv_layer.layer_dim);
+
         return Im2ColDir_BG {
             kernal: [
                 curr_conv_layer.kernal_info.dim[0] as u32,
@@ -305,6 +307,8 @@ impl PoolDir {
         let conv_layer = &conv_info.conv_layers[dir_i];
         let next_conv_layer = &conv_info.conv_layers[dir_i + 1];
 
+        println!("o dim {:?}", &next_conv_layer.layer_dim);
+
         return PoolDir {
             i_layer_dim: [
                 conv_layer.layer_dim[0] as u32,
@@ -325,7 +329,7 @@ impl PoolDir {
             pool_k: conv_layer.pooling_info.k as u32,
             batch_swap_buffer_size: conv_info.activity_info.batch_swap_buffer_size as u32,
 
-            storage_write_start: 0,
+            storage_write_start: conv_info.activity_info.strides[dir_i + 1] as u32,
             storage_write_skip: conv_info.activity_info.dim[dir_i + 1].tens_length as u32,
 
             _pad1: 0,

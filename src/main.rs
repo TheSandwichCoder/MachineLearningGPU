@@ -38,7 +38,7 @@ fn main() {
 
     conv_dispatch.conv_info.show_all_specs();
 
-    // conv_dispatch.forward_conv_mat(&gpu_instance);
+    conv_dispatch.forward_conv_mat(&gpu_instance);
     // conv_dispatch.backward_conv_mat(&gpu_instance);
     // conv_dispatch.accumulate_gradients(&gpu_instance);
     // conv_dispatch.backward_conv_mat_deriv(&gpu_instance);
