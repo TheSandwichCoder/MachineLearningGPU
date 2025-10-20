@@ -1297,91 +1297,92 @@ impl ConvDispatch {
                 label: Some("cpass"),
                 timestamp_writes: None,
             });
-            let layer_i = 1;
-            // for layer_i in (0..self.conv_info.n_layers - 1).rev() {
-            let conv_layer = &self.conv_info.conv_layers[layer_i];
+            // let layer_i = 1;
+            for layer_i in (1..self.conv_info.n_layers - 1).rev() {
+                let conv_layer = &self.conv_info.conv_layers[layer_i];
 
-            // UnPool
-            {
-                let dyn_off = layer_i as u32 * self.backward_pool_pass_info.dir_slot_size as u32;
-                pass.set_pipeline(&self.backward_pool_pass_info.pipeline);
+                // UnPool
+                {
+                    let dyn_off =
+                        layer_i as u32 * self.backward_pool_pass_info.dir_slot_size as u32;
+                    pass.set_pipeline(&self.backward_pool_pass_info.pipeline);
 
-                pass.set_bind_group(0, &self.backward_pool_pass_info.bind_group, &[dyn_off]);
+                    pass.set_bind_group(0, &self.backward_pool_pass_info.bind_group, &[dyn_off]);
 
-                let gx = ceil_div(
-                    self.conv_info.conv_layers[layer_i + 1].layer_dim[0],
-                    self.backward_pool_pass_info.workgroup_dim.x,
-                );
-                let gy = ceil_div(
-                    self.conv_info.conv_layers[layer_i + 1].layer_dim[1],
-                    self.backward_pool_pass_info.workgroup_dim.y,
-                );
+                    let gx = ceil_div(
+                        self.conv_info.conv_layers[layer_i + 1].layer_dim[0],
+                        self.backward_pool_pass_info.workgroup_dim.x,
+                    );
+                    let gy = ceil_div(
+                        self.conv_info.conv_layers[layer_i + 1].layer_dim[1],
+                        self.backward_pool_pass_info.workgroup_dim.y,
+                    );
 
-                pass.dispatch_workgroups(
-                    gx as u32,
-                    gy as u32,
-                    (self.conv_info.conv_layers[layer_i + 1].layer_dim[2]
-                        * self.conv_info.n_batches) as u32,
-                );
+                    pass.dispatch_workgroups(
+                        gx as u32,
+                        gy as u32,
+                        (self.conv_info.conv_layers[layer_i + 1].layer_dim[2]
+                            * self.conv_info.n_batches) as u32,
+                    );
+                }
+
+                // Gradient Calc
+                {
+                    let dyn_off: u32 =
+                        layer_i as u32 * self.backward_gradient_pass_info.dir_slot_size as u32;
+
+                    pass.set_pipeline(&self.backward_gradient_pass_info.pipeline);
+                    pass.set_bind_group(
+                        0,
+                        &self.backward_gradient_pass_info.bind_group,
+                        &[dyn_off],
+                    );
+
+                    let gx = ceil_div(
+                        conv_layer.n_kernals,
+                        self.backward_gradient_pass_info.workgroup_dim.x,
+                    );
+                    let gy = ceil_div(
+                        conv_layer.kernal_info.size,
+                        self.backward_gradient_pass_info.workgroup_dim.y,
+                    );
+
+                    pass.dispatch_workgroups(gx as u32, gy as u32, conv_layer.acc_length as u32);
+                }
+
+                // Gradient Accumulate
+                {
+                    let dyn_off = layer_i as u32 * self.gradient_acc_pass_info.dir_slot_size as u32;
+                    pass.set_pipeline(&self.gradient_acc_pass_info.pipeline);
+                    pass.set_bind_group(0, &self.gradient_acc_pass_info.bind_group, &[dyn_off]);
+
+                    let gx = ceil_div(
+                        conv_layer.n_kernals * conv_layer.kernal_info.size,
+                        self.gradient_acc_pass_info.workgroup_dim.x,
+                    );
+
+                    pass.dispatch_workgroups(gx as u32, 1, 1);
+                }
+
+                // Deriv Calc
+                if layer_i != 0 {
+                    let dyn_off =
+                        layer_i as u32 * self.backward_deriv_pass_info.dir_slot_size as u32;
+                    pass.set_pipeline(&self.backward_deriv_pass_info.pipeline);
+                    pass.set_bind_group(0, &self.backward_deriv_pass_info.bind_group, &[dyn_off]);
+
+                    let gx = ceil_div(
+                        conv_layer.layer_dim[2],
+                        self.backward_deriv_pass_info.workgroup_dim.x,
+                    );
+                    let gy = ceil_div(
+                        conv_layer.layer_size_2d * self.conv_info.n_batches,
+                        self.backward_deriv_pass_info.workgroup_dim.y,
+                    );
+
+                    pass.dispatch_workgroups(gx as u32, gy as u32, 1 as u32);
+                }
             }
-
-            // Gradient Calc
-            {
-                let dyn_off: u32 =
-                    layer_i as u32 * self.backward_gradient_pass_info.dir_slot_size as u32;
-
-                pass.set_pipeline(&self.backward_gradient_pass_info.pipeline);
-                pass.set_bind_group(0, &self.backward_gradient_pass_info.bind_group, &[dyn_off]);
-
-                let gx = ceil_div(
-                    conv_layer.n_kernals,
-                    self.backward_gradient_pass_info.workgroup_dim.x,
-                );
-                let gy = ceil_div(
-                    conv_layer.kernal_info.size,
-                    self.backward_gradient_pass_info.workgroup_dim.y,
-                );
-
-                println!("{} {}", gy, conv_layer.acc_length);
-
-                pass.dispatch_workgroups(gx as u32, gy as u32, conv_layer.acc_length as u32);
-            }
-
-            // Gradient Accumulate
-            {
-                let dyn_off = layer_i as u32 * self.gradient_acc_pass_info.dir_slot_size as u32;
-                pass.set_pipeline(&self.gradient_acc_pass_info.pipeline);
-                pass.set_bind_group(0, &self.gradient_acc_pass_info.bind_group, &[dyn_off]);
-
-                let gx = ceil_div(
-                    conv_layer.n_kernals * conv_layer.kernal_info.size,
-                    self.gradient_acc_pass_info.workgroup_dim.x,
-                );
-
-                pass.dispatch_workgroups(gx as u32, 1, 1);
-            }
-
-            // // Deriv Calc
-            // if layer_i != 0 {
-            //     let dyn_off = layer_i as u32 * self.backward_deriv_pass_info.dir_slot_size as u32;
-            //     pass.set_pipeline(&self.backward_deriv_pass_info.pipeline);
-            //     pass.set_bind_group(0, &self.backward_deriv_pass_info.bind_group, &[dyn_off]);
-
-            //     let gx = ceil_div(
-            //         conv_layer.layer_dim[2],
-            //         self.backward_deriv_pass_info.workgroup_dim.x,
-            //     );
-            //     let gy = ceil_div(
-            //         conv_layer.layer_size_2d * self.conv_info.n_batches,
-            //         self.backward_deriv_pass_info.workgroup_dim.y,
-            //     );
-
-            //     println!("{} {}", gy, conv_layer.acc_length);
-
-            //     pass.dispatch_workgroups(gx as u32, gy as u32, 1 as u32);
-            // }
-
-            // }
         }
         let backwards_commands = encoder.finish();
         gpu_instance.queue.submit([backwards_commands]);
@@ -1395,6 +1396,50 @@ impl ConvDispatch {
                     label: Some("encoder"),
                 });
 
+        // 0 - deriv (un pool)
+        // 1 - deriv (deriv calc)
+        // 2 - gradient
+
+        let read_type = 1;
+
+        let mut start_idx = 0;
+        let mut layer_size = 0;
+
+        if read_type == 0 {
+            encoder.copy_buffer_to_buffer(
+                &self.conv_deriv_swap_buffer,
+                0,
+                &self.out_buffer,
+                0,
+                self.conv_info.activity_info.deriv_buffer_size as u64 * 4 * 2,
+            );
+
+            start_idx = 0;
+            layer_size = 14;
+        } else if read_type == 1 {
+            encoder.copy_buffer_to_buffer(
+                &self.conv_deriv_swap_buffer,
+                0,
+                &self.out_buffer,
+                0,
+                self.conv_info.activity_info.deriv_buffer_size as u64 * 4 * 2,
+            );
+
+            start_idx = self.conv_info.activity_info.deriv_buffer_size;
+            layer_size = 14;
+        } else if read_type == 2 {
+            encoder.copy_buffer_to_buffer(
+                &self.gradient_buffer,
+                0,
+                &self.out_buffer,
+                0,
+                self.conv_info.param_info.size as u64 * 4,
+            );
+
+            start_idx = self.conv_info.param_info.k_strides[0];
+            layer_size = 8;
+        }
+
         // encoder.copy_buffer_to_buffer(&self.accumulate_buffer, 0, &self.out_buffer, 0, 30000 as u64 * 4);
         // encoder.copy_buffer_to_buffer(
         //     &self.pool_idx_storage_buffer,
@@ -1402,13 +1447,6 @@ impl ConvDispatch {
         //     &self.out_buffer,
         //     0,
         //     self.conv_info.activity_info.storage_buffer_size as u64 * 4,
-        // );
-        // encoder.copy_buffer_to_buffer(
-        //     &self.conv_deriv_swap_buffer,
-        //     0,
-        //     &self.out_buffer,
-        //     0,
-        //     self.conv_info.activity_info.deriv_buffer_size as u64 * 4 * 2,
         // );
 
         // encoder.copy_buffer_to_buffer(
@@ -1419,13 +1457,6 @@ impl ConvDispatch {
         //     self.conv_info.activity_info.storage_buffer_size as u64 * 4,
         // );
 
-        encoder.copy_buffer_to_buffer(
-            &self.gradient_buffer,
-            0,
-            &self.out_buffer,
-            0,
-            self.conv_info.param_info.size as u64 * 4,
-        );
         // encoder.copy_buffer_to_buffer(
         //     &self.conv_output_swap_buffer,
         //     0,
@@ -1449,11 +1480,8 @@ impl ConvDispatch {
 
         // let start_idx = self.conv_info.activity_info.strides[1];
         // let start_idx = self.conv_info.activity_info.strides[2];
-        // let start_idx = 0;
-        let start_idx = self.conv_info.param_info.k_strides[1];
 
-        // let layer_size = 14;
-        let layer_size = 4;
+        // let layer_size = 4;
         let check_n_layers = 30;
 
         let mut prev_idx = start_idx;

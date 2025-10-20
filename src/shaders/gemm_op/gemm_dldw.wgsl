@@ -82,9 +82,6 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
         let batch_k_i = k_i % mat_dir.batch_k_length;
         let batch_i = k_i / mat_dir.batch_k_length;
 
-        let l_n_i = k_i + t_n;
-        let l_m_i = k_i + t_m;
-
         let batch_l_n_i = batch_k_i + t_n;
         let batch_l_m_i = batch_k_i + t_m;
 
@@ -95,15 +92,13 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
         // loading
         // assignment for forward
 
-        if (g_n < mat_dir.n && l_m_i < mat_dir.k){
-            let read_idx = layer_i_offset + batch_l_m_i;
+        if (g_n < mat_dir.n && batch_l_m_i < mat_dir.batch_k_length){
+            let read_idx = layer_i_offset + batch_l_m_i; 
 
-            // a_sub[t_n][t_m] = f32(l_m_i) / 100.0 + 1.0;
             a_sub[t_n][t_m] = deriv_buffer[mat_dir.deriv_read_start + read_idx + batch_deriv_read_offset];
-            // a_sub[t_n][t_m] = 1.0;
         }
         
-        if (g_m < mat_dir.m && l_n_i < mat_dir.k){
+        if (g_m < mat_dir.m && batch_l_n_i < mat_dir.batch_k_length){
             let rel_kernal_pos = expand(batch_l_n_i, mat_dir.o_layer_dim.xyz);
             
             let read_pos = glob_kernal_pos + rel_kernal_pos + mat_dir.o_layer_offset.xyz;
@@ -114,8 +109,8 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
                 b_sub[t_n][t_m] = 0.0;
             }
             else{
-                // b_sub[t_n][t_m] = input_buffer[mat_dir.input_read_start + u32(read_idx) + batch_input_read_offset];
-                b_sub[t_n][t_m] = 1.0;
+                b_sub[t_n][t_m] = input_buffer[mat_dir.input_read_start + u32(read_idx) + batch_input_read_offset];
+                // b_sub[t_n][t_m] = 1.0;
             }
         }    
         

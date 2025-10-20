@@ -393,7 +393,7 @@ impl ConvActivityInfo {
         };
     }
 
-    // initial values in conv layer 1
+    // initial values in layer 1
     pub fn create_output_swap_buffer(&self) -> Vec<f32> {
         let mut empty = vec![0.0; self.swap_buffer_size * 2];
 
@@ -410,12 +410,11 @@ impl ConvActivityInfo {
         // return vec![1.0; self.swap_buffer_size * 2];
         let mut empty_vec = vec![1.0; self.swap_buffer_size * 2];
 
-        // for i in 0..self.swap_buffer_size * 2 {
-        //     // empty_vec[i] = 1.0 + (i) as f32 * 0.01;
-        //     empty_vec[i] = 1.0 + (i % self.batch_swap_buffer_size) as f32 * 0.01;
-
-        //     // empty_vec[i] = 1.0;
-        // }
+        for i in 0..self.swap_buffer_size * 2 {
+            // empty_vec[i] = 1.0 + (i) as f32 * 0.01;
+            empty_vec[i] = 1.0 + (i % self.batch_swap_buffer_size) as f32 * 0.01;
+            // empty_vec[i] = 1.0;
+        }
 
         return empty_vec;
     }

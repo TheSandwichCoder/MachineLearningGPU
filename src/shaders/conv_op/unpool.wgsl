@@ -53,7 +53,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let write_coord = kernal_coord + vec3u(pool_x, pool_y, 0);
 
-    let read_idx = flatten(kernal_coord, pool_dir.o_layer_dim.xyz);
+    let read_idx = flatten(vec3u(gid.xy, channels_i), pool_dir.o_layer_dim.xyz);
     let write_idx = flatten(write_coord, pool_dir.i_layer_dim.xyz);
 
     let v = deriv_swap_buffer[pool_dir.read_start + batch_read_offset + read_idx];

@@ -59,6 +59,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
 
     var v = 0.0;
 
+    let layer_i_offset = g_n * mat_dir.kernal_layer_size;
 
     let is_dead : bool = (g_n >= mat_dir.n || g_m >= mat_dir.m);
     
@@ -69,23 +70,32 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
             break;
         }
 
-        let l_n_i = k_i + t_n;
-        let l_m_i = k_i + t_m;
+        // let l_n_i = k_i + t_n;
+        // let l_m_i = k_i + t_m;
 
-        let kernal_i = l_m_i / mat_dir.kernal_layer_size; 
-        let kernal_weight_i = l_m_i % mat_dir.kernal_layer_size;
+        // let kernal_i = l_m_i / mat_dir.kernal_layer_size; 
+        // let kernal_weight_i = l_m_i % mat_dir.kernal_layer_size;
 
-        let layer_i = l_n_i / mat_dir.kernal_layer_size;
-        let layer_value_i = l_n_i % mat_dir.kernal_layer_size;
+        // let layer_i = l_n_i / mat_dir.kernal_layer_size;
+        // let layer_value_i = l_n_i % mat_dir.kernal_layer_size;
 
-        let kernal_i_offset = kernal_i * mat_dir.kernal_size;
+        // let kernal_i_offset = kernal_i * mat_dir.kernal_size;
 
+        let layer_k_i = k_i % mat_dir.kernal_layer_size;
+        let layer_i = k_i / mat_dir.kernal_layer_size;
+
+        let layer_l_n_i = layer_k_i + t_n;
+        let layer_l_m_i = layer_k_i + t_m;
+
+        let param_read_offset = layer_i * mat_dir.kernal_size;
+        let deriv_read_offset = layer_i * o_layer_dim.x * o_layer_dim.y;
+        
 
         // loading
         // assignment for forward
 
         if (g_n < mat_dir.n && l_m_i < mat_dir.k){
-            let read_idx = kernal_i_offset + (mat_dir.kernal_layer_size - kernal_weight_i); // rotate kernal by 180
+            let read_idx = kernal_i_offset + layer_i_offset + (mat_dir.kernal_layer_size - kernal_weight_i); // rotate kernal by 180
 
             a_sub[t_n][t_m] = param_buffer[mat_dir.kernal_read_start + read_idx];
             // a_sub[t_n][t_m] = 1.0;
