@@ -228,7 +228,7 @@ impl Im2ColDir_BD {
             o_layer_dim: [
                 curr_conv_layer.layer_dim[0] as u32,
                 curr_conv_layer.layer_dim[1] as u32,
-                curr_conv_layer.n_kernals as u32,
+                next_conv_layer.layer_dim[2] as u32,
                 0,
             ],
 

@@ -31,13 +31,14 @@ fn main() {
     conv_construct.set_pool(vec![2, 2]);
     conv_construct.set_kernal(vec![8, 4]);
     conv_construct.set_outputs(vec![10, 1]);
-    conv_construct.set_n_batches(1);
+    conv_construct.set_n_batches(16);
 
     let gpu_instance = pollster::block_on(GPUInstance::new());
     let mut conv_dispatch = ConvDispatch::new(&gpu_instance, conv_construct);
 
     conv_dispatch.conv_info.show_all_specs();
 
+    conv_dispatch.temp_forward_copy(&gpu_instance);
     conv_dispatch.forward_conv_mat(&gpu_instance);
     // conv_dispatch.backward_conv_mat(&gpu_instance);
     // conv_dispatch.accumulate_gradients(&gpu_instance);

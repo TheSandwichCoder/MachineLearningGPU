@@ -1219,6 +1219,30 @@ impl ConvDispatch {
         gpu_instance.queue.submit([backward_commands]);
     }
 
+    pub fn temp_forward_copy(&self, gpu_instance: &GPUInstance) {
+        let mut encoder =
+            gpu_instance
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("encoder"),
+                });
+
+        for batch_i in 0..self.conv_info.n_batches {
+            let read_i = self.conv_info.activity_info.batch_swap_buffer_size * batch_i;
+            let write_i = self.conv_info.activity_info.dim[0].tens_length * batch_i;
+
+            encoder.copy_buffer_to_buffer(
+                &self.conv_output_swap_buffer,
+                (read_i * 4) as u64,
+                &self.o_storage_buffer,
+                (write_i * 4) as u64,
+                (self.conv_info.activity_info.dim[0].tens_length * 4) as u64,
+            );
+        }
+
+        gpu_instance.queue.submit([encoder.finish()]);
+    }
+
     pub fn forward_conv_mat(&self, gpu_instance: &GPUInstance) {
         let mut encoder =
             gpu_instance
@@ -1298,7 +1322,7 @@ impl ConvDispatch {
                 timestamp_writes: None,
             });
             // let layer_i = 1;
-            for layer_i in (1..self.conv_info.n_layers - 1).rev() {
+            for layer_i in (0..self.conv_info.n_layers - 1).rev() {
                 let conv_layer = &self.conv_info.conv_layers[layer_i];
 
                 // UnPool
@@ -1400,7 +1424,7 @@ impl ConvDispatch {
         // 1 - deriv (deriv calc)
         // 2 - gradient
 
-        let read_type = 1;
+        let read_type = 2;
 
         let mut start_idx = 0;
         let mut layer_size = 0;
@@ -1415,7 +1439,7 @@ impl ConvDispatch {
             );
 
             start_idx = 0;
-            layer_size = 14;
+            layer_size = 28;
         } else if read_type == 1 {
             encoder.copy_buffer_to_buffer(
                 &self.conv_deriv_swap_buffer,

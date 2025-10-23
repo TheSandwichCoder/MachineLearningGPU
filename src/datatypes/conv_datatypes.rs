@@ -358,7 +358,6 @@ impl ConvActivityInfo {
         println!("asdkjfhsdakjfh {}", largest_layer);
         // storage buffer
         let mut stride_offset = 0;
-        let mut stride_offset_batch = 0;
 
         let mut strides = Vec::new();
 
@@ -398,8 +397,8 @@ impl ConvActivityInfo {
         let mut empty = vec![0.0; self.swap_buffer_size * 2];
 
         for i in 0..self.swap_buffer_size {
-            // empty[i] = (i % self.batch_swap_buffer_size + i / self.batch_swap_buffer_size) as f32;
-            empty[i] = 1.0;
+            empty[i] = (i % self.batch_swap_buffer_size) as f32 / 1000.0;
+            // empty[i] = 1.0;
         }
 
         return empty;
@@ -429,7 +428,7 @@ impl ConvActivityInfo {
         //     // empty[i] = 1 as f32;
         // }
 
-        // for i in d_start..self.size{
+        // for i in d_start..self.storage_buffer_size {
         //     empty[i] = 1.0;
         // }
 
@@ -522,12 +521,12 @@ impl ConvParamInfo {
     pub fn create_buffer(&self) -> Vec<f32> {
         let mut empty_vec = vec![1.0; self.size];
 
-        // for i in 0..self.k_strides[1] {
-        //     empty_vec[i] = (i as f32 - 32.0) / 64.0;
-        // }
-        // for i in self.k_strides[1]..self.k_strides[2] {
-        //     empty_vec[i] = ((i - self.k_strides[1]) as f32 - 32.0) / 64.0;
-        // }
+        for i in 0..self.k_strides[1] {
+            empty_vec[i] = (i as f32 - 32.0) / 64.0;
+        }
+        for i in self.k_strides[1]..self.k_strides[2] {
+            empty_vec[i] = ((i - self.k_strides[1]) as f32 - 32.0) / 64.0;
+        }
 
         // println!("{:?}", &empty_vec[self.k_strides[1]..self.k_strides[2]]);
 

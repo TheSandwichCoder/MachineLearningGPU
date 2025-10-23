@@ -88,28 +88,29 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
         let layer_l_m_i = layer_k_i + t_m;
 
         let param_read_offset = layer_i * mat_dir.kernal_size;
-        let deriv_read_offset = layer_i * o_layer_dim.x * o_layer_dim.y;
+        let deriv_read_offset = layer_i * mat_dir.o_layer_dim.x * mat_dir.o_layer_dim.y;
         
 
         // loading
         // assignment for forward
 
-        if (g_n < mat_dir.n && l_m_i < mat_dir.k){
-            let read_idx = kernal_i_offset + layer_i_offset + (mat_dir.kernal_layer_size - kernal_weight_i); // rotate kernal by 180
+        if (g_n < mat_dir.n && layer_l_m_i < mat_dir.kernal_layer_size){
+            let read_idx = param_read_offset + layer_i_offset + (mat_dir.kernal_layer_size - layer_l_m_i - 1); // rotate kernal by 180
 
             a_sub[t_n][t_m] = param_buffer[mat_dir.kernal_read_start + read_idx];
             // a_sub[t_n][t_m] = 1.0;
         }
-        if (g_m < mat_dir.m && l_n_i < mat_dir.k){
-            let rel_kernal_pos = expand(layer_value_i, mat_dir.kernal_dim.xyz);
+        if (g_m < mat_dir.m && layer_l_n_i < mat_dir.kernal_layer_size){
+            let rel_kernal_pos = expand(layer_l_n_i, mat_dir.kernal_dim.xyz);
             
-            let read_pos = glob_kernal_pos + rel_kernal_pos + vec3i(0, 0, i32(layer_i)) + mat_dir.kernal_offset.xyz;
-            // let read_pos = glob_kernal_pos + rel_kernal_pos + mat_dir.kernal_offset.xyz;
+            // let read_pos = vec3i(0, 0, 0) + rel_kernal_pos + vec3i(0, 0, i32(layer_i)) + mat_dir.kernal_offset.xyz;
+            let read_pos = glob_kernal_pos + rel_kernal_pos + mat_dir.kernal_offset.xyz;
 
             let read_idx = flatten_safe(read_pos, vec3i(mat_dir.o_layer_dim.xyz));
 
             if read_idx == -1{
                 b_sub[t_n][t_m] = 0.0;
+                // b_sub[t_n][t_m] = deriv_swap_buffer[mat_dir.layer_read_start + u32(read_idx) + batch_buffer_offset];
             }
             else{
                 b_sub[t_n][t_m] = deriv_swap_buffer[mat_dir.layer_read_start + u32(read_idx) + batch_buffer_offset];
