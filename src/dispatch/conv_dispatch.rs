@@ -1,6 +1,6 @@
 use crate::datatypes::{conv_datatypes::*, workgroup::*};
 use crate::functions::*;
-use crate::gpu_dirs::conv_dirs::*;
+use crate::gpu_dirs::{conv_dirs::*, nn_dirs::FlatApplyDir};
 use bytemuck::{Pod, Zeroable};
 use std::num::NonZeroU64;
 use wgpu::util::DeviceExt;
@@ -66,6 +66,7 @@ pub struct ConvDispatch {
     backward_pool_pass_info: ConvPassInfo,
 
     gradient_acc_pass_info: ConvPassInfo,
+    momentum_pass_info: ConvPassInfo,
 
     pub conv_info: ConvolutionInfo,
 }
@@ -1029,6 +1030,156 @@ impl ConvDispatch {
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 });
 
+        // +--------------------------------------------------------+
+        // |                                                        |
+        // |                    Momentum Pass                       |
+        // |                                                        |
+        // +--------------------------------------------------------+
+
+        let momentum_slot = ((std::mem::size_of::<FlatApplyDir>() as u64 + gpu_instance.align - 1)
+            / gpu_instance.align)
+            * gpu_instance.align;
+        let momentum_dir_buffer_size = momentum_slot as u64 * conv_info.n_batches as u64;
+
+        let momentum_dir_buffer = gpu_instance.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("momentum_dir_buf"),
+            size: momentum_dir_buffer_size,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // ---------------------Special Binding---------------------
+        let momentum_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &momentum_dir_buffer,
+            offset: 0,
+            size: Some(wgpu::BufferSize::new(momentum_slot).unwrap()),
+        });
+
+        // ---------------------Shader Sources---------------------
+        let wgsl_src = include_str!("../shaders/apply_op/apply_momentum.wgsl");
+        let momentum_shader =
+            gpu_instance
+                .device
+                .create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some("momentum_shader"),
+                    source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
+                });
+
+        // ---------------------Bind Layout---------------------
+        let momentum_bind_layout =
+            gpu_instance
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("momentum_bind_layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: true,
+                                min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<
+                                    FlatApplyDir,
+                                >(
+                                )
+                                    as u64),
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+
+        let momentum_bind_group =
+            gpu_instance
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("bg"),
+                    layout: &momentum_bind_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: param_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: momentum_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: gradient_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: momentum_dir_binding,
+                        },
+                    ],
+                });
+
+        // ---------------------Update Meta---------------------
+
+        for batch_i in 0..conv_info.n_batches {
+            let momentum_dir = FlatApplyDir::new_conv(&conv_info, batch_i);
+
+            gpu_instance.queue.write_buffer(
+                &momentum_dir_buffer,
+                batch_i as u64 * momentum_slot,
+                bytemuck::bytes_of(&momentum_dir),
+            );
+        }
+
+        // ---------------------Pipeline Layout---------------------
+
+        let momentum_pipeline_layout =
+            gpu_instance
+                .device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("momentum_pipeline_layout"),
+                    bind_group_layouts: &[&momentum_bind_layout],
+                    push_constant_ranges: &[],
+                });
+
+        let momentum_pipeline =
+            gpu_instance
+                .device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("momentum_pipeline"),
+                    layout: Some(&momentum_pipeline_layout),
+                    module: &momentum_shader,
+                    entry_point: Some("main"),
+                    cache: None,
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                });
+
         let gem_wg = vec![16, 16, 0];
 
         let forward_mat_pass_info = ConvPassInfo::new(
@@ -1082,6 +1233,15 @@ impl ConvDispatch {
             vec![32, 0, 0],
         );
 
+        let momentum_pass_info = ConvPassInfo::new(
+            momentum_dir_buffer,
+            momentum_shader,
+            momentum_bind_group,
+            momentum_pipeline,
+            momentum_slot,
+            vec![256, 0, 0],
+        );
+
         return ConvDispatch {
             param_buffer,
             gradient_buffer,
@@ -1101,9 +1261,43 @@ impl ConvDispatch {
             backward_pool_pass_info,
 
             gradient_acc_pass_info,
+            momentum_pass_info,
 
             conv_info,
         };
+    }
+
+    pub fn update_momentum(&self, gpu_instance: &GPUInstance) {
+        let mut encoder =
+            gpu_instance
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("encoder"),
+                });
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("cpass"),
+                timestamp_writes: None,
+            });
+
+            pass.set_pipeline(&self.momentum_pass_info.pipeline);
+
+            let batch_i = 0;
+
+            let dyn_off = batch_i as u32 * self.momentum_pass_info.dir_slot_size as u32;
+            pass.set_bind_group(0, &self.momentum_pass_info.bind_group, &[dyn_off]);
+
+            let gx = ceil_div(
+                self.conv_info.param_info.size,
+                self.momentum_pass_info.workgroup_dim.x,
+            );
+
+            pass.dispatch_workgroups(gx as u32, 1, 1);
+        }
+
+        let momentum_commands = encoder.finish();
+        gpu_instance.queue.submit([momentum_commands]);
     }
 
     pub fn accumulate_gradients(&self, gpu_instance: &GPUInstance) {
@@ -1463,33 +1657,6 @@ impl ConvDispatch {
             start_idx = self.conv_info.param_info.k_strides[0];
             layer_size = 8;
         }
-
-        // encoder.copy_buffer_to_buffer(&self.accumulate_buffer, 0, &self.out_buffer, 0, 30000 as u64 * 4);
-        // encoder.copy_buffer_to_buffer(
-        //     &self.pool_idx_storage_buffer,
-        //     0,
-        //     &self.out_buffer,
-        //     0,
-        //     self.conv_info.activity_info.storage_buffer_size as u64 * 4,
-        // );
-
-        // encoder.copy_buffer_to_buffer(
-        //     &self.o_storage_buffer,
-        //     0,
-        //     &self.out_buffer,
-        //     0,
-        //     self.conv_info.activity_info.storage_buffer_size as u64 * 4,
-        // );
-
-        // encoder.copy_buffer_to_buffer(
-        //     &self.conv_output_swap_buffer,
-        //     0,
-        //     &self.out_buffer,
-        //     0,
-        //     self.conv_info.param_info.size as u64 * 4,
-        // );
-
-        // encoder.copy_buffer_to_buffer(&self.conv_output_swap_buffer, 0, &self.out_buffer, 0, self.conv_info.activity_info.swap_buffer_size as u64 * 4 * 2);
 
         gpu_instance.queue.submit(Some(encoder.finish()));
 

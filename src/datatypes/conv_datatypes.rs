@@ -41,6 +41,9 @@ pub struct ConvolutionConstructor {
     pub pooling_dim: Vec<usize>,
     pub kernal_dim: Vec<usize>,
     pub layer_output: Vec<usize>,
+
+    pub lr: f32,
+    pub mr: f32,
 }
 
 impl ConvolutionConstructor {
@@ -56,6 +59,9 @@ impl ConvolutionConstructor {
             pooling_dim: Vec::new(),
             kernal_dim: Vec::new(),
             layer_output: Vec::new(),
+
+            lr: 0.1,
+            mr: 0.9,
         };
     }
 
@@ -82,6 +88,14 @@ impl ConvolutionConstructor {
     pub fn set_n_batches(&mut self, n_batches: usize) {
         self.n_batches = n_batches;
     }
+
+    pub fn set_lr(&mut self, lr: f32) {
+        self.lr = lr;
+    }
+
+    pub fn set_mr(&mut self, mr: f32) {
+        self.mr = mr;
+    }
 }
 
 #[derive(Clone)]
@@ -94,6 +108,9 @@ pub struct ConvolutionInfo {
     pub n_layers: usize,
     pub n_batches: usize,
     pub split_k: usize,
+
+    pub lr: f32,
+    pub mr: f32,
 }
 
 impl ConvolutionInfo {
@@ -162,6 +179,9 @@ impl ConvolutionInfo {
             n_layers: constructor.n_layers,
             n_batches: constructor.n_batches,
             split_k: constructor.split_k,
+
+            lr: constructor.lr,
+            mr: constructor.mr,
         };
     }
 

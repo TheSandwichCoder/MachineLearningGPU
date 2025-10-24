@@ -614,7 +614,7 @@ impl NNDispatch {
         // ---------------------Update Meta---------------------
 
         for batch_i in 0..nn_info.n_batches {
-            let momentum_dir = FlatApplyDir::new(&nn_info, batch_i);
+            let momentum_dir = FlatApplyDir::new_nn(&nn_info, batch_i);
 
             gpu_instance.queue.write_buffer(
                 &momentum_dir_buffer,

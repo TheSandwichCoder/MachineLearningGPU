@@ -17,7 +17,7 @@ use crate::model::*;
 use crate::conv_datatypes::*;
 
 // TODO
-// test backward gradient prop with layer > 1
+// fix the momentum calc for nn and conv
 // get everything to work with the relu and biases
 // integrate both of them together
 
