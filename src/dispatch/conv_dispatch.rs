@@ -61,11 +61,13 @@ pub struct ConvDispatch {
     forward_mat_pass_info: ConvPassInfo,
     forward_pool_pass_info: ConvPassInfo,
 
-    backward_gradient_pass_info: ConvPassInfo,
+    backward_weight_gradient_pass_info: ConvPassInfo,
+    backward_bias_gradient_pass_info: ConvPassInfo,
     backward_deriv_pass_info: ConvPassInfo,
     backward_pool_pass_info: ConvPassInfo,
 
-    gradient_acc_pass_info: ConvPassInfo,
+    weight_gradient_acc_pass_info: ConvPassInfo,
+    bias_gradient_acc_pass_info: ConvPassInfo,
     momentum_pass_info: ConvPassInfo,
 
     pub conv_info: ConvolutionInfo,
@@ -476,15 +478,15 @@ impl ConvDispatch {
 
         // +--------------------------------------------------------+
         // |                                                        |
-        // |               Gradient Accumulate Pass                 |
+        // |           Weight Gradient Accumulate Pass              |
         // |                                                        |
         // +--------------------------------------------------------+
 
-        let gradient_acc_bind_layout =
+        let weight_gradient_acc_bind_layout =
             gpu_instance
                 .device
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("gradient_acc_bind_layout"),
+                    label: Some("weight_gradient_acc_bind_layout"),
                     entries: &[
                         wgpu::BindGroupLayoutEntry {
                             binding: 0,
@@ -521,29 +523,31 @@ impl ConvDispatch {
                     ],
                 });
 
-        let gradient_acc_slot = ((std::mem::size_of::<AccDir>() as u64 + gpu_instance.align - 1)
-            / gpu_instance.align)
-            * gpu_instance.align;
+        let weight_gradient_acc_slot =
+            ((std::mem::size_of::<AccDir>() as u64 + gpu_instance.align - 1) / gpu_instance.align)
+                * gpu_instance.align;
 
-        let gradient_acc_dir_buffer_size = gradient_acc_slot * (conv_info.n_layers - 1) as u64;
+        let weight_gradient_acc_dir_buffer_size =
+            weight_gradient_acc_slot * (conv_info.n_layers - 1) as u64;
 
-        let gradient_acc_dir_buffer = gpu_instance.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("cgradient_acc_dir_buf"),
-            size: gradient_acc_dir_buffer_size,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let weight_gradient_acc_dir_buffer =
+            gpu_instance.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("cweight_gradient_acc_dir_buf"),
+                size: weight_gradient_acc_dir_buffer_size,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
 
         // ---------------------Special Binding---------------------
-        let gradient_acc_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-            buffer: &gradient_acc_dir_buffer,
+        let weight_gradient_acc_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &weight_gradient_acc_dir_buffer,
             offset: 0,
-            size: Some(wgpu::BufferSize::new(gradient_acc_slot).unwrap()),
+            size: Some(wgpu::BufferSize::new(weight_gradient_acc_slot).unwrap()),
         });
 
         // ---------------------Shader Sources---------------------
         let wgsl_src = include_str!("../shaders/conv_op/acc_gradients.wgsl");
-        let gradient_acc_shader =
+        let weight_gradient_acc_shader =
             gpu_instance
                 .device
                 .create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -551,12 +555,12 @@ impl ConvDispatch {
                     source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
                 });
 
-        let gradient_acc_bind_group =
+        let weight_gradient_acc_bind_group =
             gpu_instance
                 .device
                 .create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("gradient acc bg"),
-                    layout: &gradient_acc_bind_layout,
+                    layout: &weight_gradient_acc_bind_layout,
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
@@ -568,7 +572,7 @@ impl ConvDispatch {
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
-                            resource: gradient_acc_dir_binding,
+                            resource: weight_gradient_acc_dir_binding,
                         },
                     ],
                 });
@@ -576,33 +580,33 @@ impl ConvDispatch {
         // ---------------------Update Meta---------------------
 
         for layer_i in 0..conv_info.n_layers - 1 {
-            let gradient_acc_dir = AccDir::new(&conv_info, layer_i);
+            let weight_gradient_acc_dir = AccDir::new_weight(&conv_info, layer_i);
 
             gpu_instance.queue.write_buffer(
-                &gradient_acc_dir_buffer,
-                layer_i as u64 * gradient_acc_slot,
-                bytemuck::bytes_of(&gradient_acc_dir),
+                &weight_gradient_acc_dir_buffer,
+                layer_i as u64 * weight_gradient_acc_slot,
+                bytemuck::bytes_of(&weight_gradient_acc_dir),
             );
         }
 
         // ---------------------Pipeline Layout---------------------
 
-        let gradient_acc_pipeline_layout =
+        let weight_gradient_acc_pipeline_layout =
             gpu_instance
                 .device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("cgradient_acc_pipeline_layout"),
-                    bind_group_layouts: &[&gradient_acc_bind_layout],
+                    label: Some("cweight_gradient_acc_pipeline_layout"),
+                    bind_group_layouts: &[&weight_gradient_acc_bind_layout],
                     push_constant_ranges: &[],
                 });
 
-        let gradient_acc_pipeline =
+        let weight_gradient_acc_pipeline =
             gpu_instance
                 .device
                 .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("gradient_acc_pipeline"),
-                    layout: Some(&gradient_acc_pipeline_layout),
-                    module: &gradient_acc_shader,
+                    label: Some("weight_gradient_acc_pipeline"),
+                    layout: Some(&weight_gradient_acc_pipeline_layout),
+                    module: &weight_gradient_acc_shader,
                     entry_point: Some("main"),
                     cache: None,
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -610,11 +614,147 @@ impl ConvDispatch {
 
         // +--------------------------------------------------------+
         // |                                                        |
-        // |                Backward Gradient Pass                  |
+        // |             Bias Gradient Accumulate Pass              |
         // |                                                        |
         // +--------------------------------------------------------+
 
-        let backward_gradient_bind_layout =
+        let bias_gradient_acc_bind_layout =
+            gpu_instance
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("bias_gradient_acc_bind_layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: true,
+                                min_binding_size: wgpu::BufferSize::new(
+                                    std::mem::size_of::<AccDir>() as u64,
+                                ),
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+
+        let bias_gradient_acc_slot =
+            ((std::mem::size_of::<AccDir>() as u64 + gpu_instance.align - 1) / gpu_instance.align)
+                * gpu_instance.align;
+
+        let bias_gradient_acc_dir_buffer_size =
+            bias_gradient_acc_slot * (conv_info.n_layers - 1) as u64;
+
+        let bias_gradient_acc_dir_buffer =
+            gpu_instance.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("cbias_gradient_acc_dir_buf"),
+                size: bias_gradient_acc_dir_buffer_size,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+
+        // ---------------------Special Binding---------------------
+        let bias_gradient_acc_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &bias_gradient_acc_dir_buffer,
+            offset: 0,
+            size: Some(wgpu::BufferSize::new(bias_gradient_acc_slot).unwrap()),
+        });
+
+        // ---------------------Shader Sources---------------------
+        let wgsl_src = include_str!("../shaders/conv_op/acc_gradients.wgsl");
+        let bias_gradient_acc_shader =
+            gpu_instance
+                .device
+                .create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some("acc_gradient_shader"),
+                    source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
+                });
+
+        let bias_gradient_acc_bind_group =
+            gpu_instance
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("gradient acc bg"),
+                    layout: &bias_gradient_acc_bind_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: accumulate_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: gradient_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: bias_gradient_acc_dir_binding,
+                        },
+                    ],
+                });
+
+        // ---------------------Update Meta---------------------
+
+        for layer_i in 0..conv_info.n_layers - 1 {
+            let bias_gradient_acc_dir = AccDir::new_bias(&conv_info, layer_i);
+
+            gpu_instance.queue.write_buffer(
+                &bias_gradient_acc_dir_buffer,
+                layer_i as u64 * bias_gradient_acc_slot,
+                bytemuck::bytes_of(&bias_gradient_acc_dir),
+            );
+        }
+
+        // ---------------------Pipeline Layout---------------------
+
+        let bias_gradient_acc_pipeline_layout =
+            gpu_instance
+                .device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("cbias_gradient_acc_pipeline_layout"),
+                    bind_group_layouts: &[&bias_gradient_acc_bind_layout],
+                    push_constant_ranges: &[],
+                });
+
+        let bias_gradient_acc_pipeline =
+            gpu_instance
+                .device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("bias_gradient_acc_pipeline"),
+                    layout: Some(&bias_gradient_acc_pipeline_layout),
+                    module: &bias_gradient_acc_shader,
+                    entry_point: Some("main"),
+                    cache: None,
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                });
+
+        // +--------------------------------------------------------+
+        // |                                                        |
+        // |            Backward Weight Gradient Pass               |
+        // |                                                        |
+        // +--------------------------------------------------------+
+
+        let backward_weight_gradient_bind_layout =
             gpu_instance
                 .device
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -671,39 +811,41 @@ impl ConvDispatch {
             / gpu_instance.align)
             * gpu_instance.align;
 
-        let backward_gradient_dir_buffer_size = imcol_bg_slot * (conv_info.n_layers - 1) as u64;
+        let backward_weight_gradient_dir_buffer_size =
+            imcol_bg_slot * (conv_info.n_layers - 1) as u64;
 
-        let backward_gradient_dir_buffer =
+        let backward_weight_gradient_dir_buffer =
             gpu_instance.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("cbackwards_gradient_dir_buf"),
-                size: backward_gradient_dir_buffer_size,
+                size: backward_weight_gradient_dir_buffer_size,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
 
         // ---------------------Special Binding---------------------
-        let backward_gradient_dir_binding = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-            buffer: &backward_gradient_dir_buffer,
-            offset: 0,
-            size: Some(wgpu::BufferSize::new(imcol_bg_slot).unwrap()),
-        });
+        let backward_weight_gradient_dir_binding =
+            wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: &backward_weight_gradient_dir_buffer,
+                offset: 0,
+                size: Some(wgpu::BufferSize::new(imcol_bg_slot).unwrap()),
+            });
 
         // ---------------------Shader Sources---------------------
         let wgsl_src = include_str!("../shaders/gemm_op/gemm_dldw.wgsl");
-        let backward_gradient_shader =
+        let backward_weight_gradient_shader =
             gpu_instance
                 .device
                 .create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some("cbackward_gradient_shader"),
+                    label: Some("cbackward_weight_gradient_shader"),
                     source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
                 });
 
-        let backward_gradient_bind_group =
+        let backward_weight_gradient_bind_group =
             gpu_instance
                 .device
                 .create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("backward gradient bg"),
-                    layout: &backward_gradient_bind_layout,
+                    layout: &backward_weight_gradient_bind_layout,
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
@@ -719,7 +861,7 @@ impl ConvDispatch {
                         },
                         wgpu::BindGroupEntry {
                             binding: 3,
-                            resource: backward_gradient_dir_binding,
+                            resource: backward_weight_gradient_dir_binding,
                         },
                     ],
                 });
@@ -727,33 +869,171 @@ impl ConvDispatch {
         // ---------------------Update Meta---------------------
 
         for layer_i in 0..conv_info.n_layers - 1 {
-            let backward_gradient_dir = Im2ColDir_BG::new(&conv_info, layer_i);
+            let backward_weight_gradient_dir = Im2ColDir_BG::new(&conv_info, layer_i);
 
             gpu_instance.queue.write_buffer(
-                &backward_gradient_dir_buffer,
+                &backward_weight_gradient_dir_buffer,
                 layer_i as u64 * imcol_bg_slot,
-                bytemuck::bytes_of(&backward_gradient_dir),
+                bytemuck::bytes_of(&backward_weight_gradient_dir),
             );
         }
 
         // ---------------------Pipeline Layout---------------------
 
-        let backward_gradient_pipeline_layout =
+        let backward_weight_gradient_pipeline_layout =
             gpu_instance
                 .device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("cbackward_gradient_pipeline_layout"),
-                    bind_group_layouts: &[&backward_gradient_bind_layout],
+                    label: Some("cbackward_weight_gradient_pipeline_layout"),
+                    bind_group_layouts: &[&backward_weight_gradient_bind_layout],
                     push_constant_ranges: &[],
                 });
 
-        let backward_gradient_pipeline =
+        let backward_weight_gradient_pipeline =
             gpu_instance
                 .device
                 .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("cbackward_gradient_pipeline"),
-                    layout: Some(&backward_gradient_pipeline_layout),
-                    module: &backward_gradient_shader,
+                    label: Some("cbackward_weight_gradient_pipeline"),
+                    layout: Some(&backward_weight_gradient_pipeline_layout),
+                    module: &backward_weight_gradient_shader,
+                    entry_point: Some("main"),
+                    cache: None,
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                });
+
+        // +--------------------------------------------------------+
+        // |                                                        |
+        // |              Backward Bias Gradient Pass               |
+        // |                                                        |
+        // +--------------------------------------------------------+
+
+        let backward_bias_gradient_bind_layout =
+            gpu_instance
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("c_b_b_g_bind_layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: true,
+                                min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<
+                                    BiasGradientDir,
+                                >(
+                                )
+                                    as u64),
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+
+        let bg_slot = ((std::mem::size_of::<BiasGradientDir>() as u64 + gpu_instance.align - 1)
+            / gpu_instance.align)
+            * gpu_instance.align;
+
+        let backward_bias_gradient_dir_buffer_size = bg_slot * (conv_info.n_layers - 1) as u64;
+
+        let backward_bias_gradient_dir_buffer =
+            gpu_instance.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("cbackwards_bias_gradient_dir_buf"),
+                size: backward_bias_gradient_dir_buffer_size,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+
+        // ---------------------Special Binding---------------------
+        let backward_bias_gradient_dir_binding =
+            wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: &backward_bias_gradient_dir_buffer,
+                offset: 0,
+                size: Some(wgpu::BufferSize::new(bg_slot).unwrap()),
+            });
+
+        // ---------------------Shader Sources---------------------
+        let wgsl_src = include_str!("../shaders/conv_op/acc_dldb.wgsl");
+        let backward_bias_gradient_shader =
+            gpu_instance
+                .device
+                .create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some("cbackward_bias_gradient_shader"),
+                    source: wgpu::ShaderSource::Wgsl(wgsl_src.into()),
+                });
+
+        let backward_bias_gradient_bind_group =
+            gpu_instance
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("backward bias_gradient bg"),
+                    layout: &backward_bias_gradient_bind_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: conv_deriv_swap_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: accumulate_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: backward_bias_gradient_dir_binding,
+                        },
+                    ],
+                });
+
+        // ---------------------Update Meta---------------------
+
+        for layer_i in 0..conv_info.n_layers - 1 {
+            let backward_bias_gradient_dir = BiasGradientDir::new(&conv_info, layer_i);
+
+            gpu_instance.queue.write_buffer(
+                &backward_bias_gradient_dir_buffer,
+                layer_i as u64 * bg_slot,
+                bytemuck::bytes_of(&backward_bias_gradient_dir),
+            );
+        }
+
+        // ---------------------Pipeline Layout---------------------
+
+        let backward_bias_gradient_pipeline_layout =
+            gpu_instance
+                .device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("cbackward_bias_gradient_pipeline_layout"),
+                    bind_group_layouts: &[&backward_bias_gradient_bind_layout],
+                    push_constant_ranges: &[],
+                });
+
+        let backward_bias_gradient_pipeline =
+            gpu_instance
+                .device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("cbackward_bias_gradient_pipeline"),
+                    layout: Some(&backward_bias_gradient_pipeline_layout),
+                    module: &backward_bias_gradient_shader,
                     entry_point: Some("main"),
                     cache: None,
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -785,7 +1065,7 @@ impl ConvDispatch {
                             binding: 1,
                             visibility: wgpu::ShaderStages::COMPUTE,
                             ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
                                 has_dynamic_offset: false,
                                 min_binding_size: None,
                             },
@@ -793,6 +1073,16 @@ impl ConvDispatch {
                         },
                         wgpu::BindGroupLayoutEntry {
                             binding: 2,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
                             visibility: wgpu::ShaderStages::COMPUTE,
                             ty: wgpu::BindingType::Buffer {
                                 ty: wgpu::BufferBindingType::Uniform,
@@ -852,10 +1142,14 @@ impl ConvDispatch {
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
-                            resource: conv_deriv_swap_buffer.as_entire_binding(),
+                            resource: o_storage_buffer.as_entire_binding(),
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
+                            resource: conv_deriv_swap_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
                             resource: backward_deriv_dir_binding,
                         },
                     ],
@@ -1199,14 +1493,24 @@ impl ConvDispatch {
             vec![8, 8, 1],
         );
 
-        let backward_gradient_pass_info = ConvPassInfo::new(
-            backward_gradient_dir_buffer,
-            backward_gradient_shader,
-            backward_gradient_bind_group,
-            backward_gradient_pipeline,
+        let backward_weight_gradient_pass_info = ConvPassInfo::new(
+            backward_weight_gradient_dir_buffer,
+            backward_weight_gradient_shader,
+            backward_weight_gradient_bind_group,
+            backward_weight_gradient_pipeline,
             imcol_bg_slot,
             gem_wg.clone(),
         );
+
+        let backward_bias_gradient_pass_info = ConvPassInfo::new(
+            backward_bias_gradient_dir_buffer,
+            backward_bias_gradient_shader,
+            backward_bias_gradient_bind_group,
+            backward_bias_gradient_pipeline,
+            bg_slot,
+            vec![16, 16, 1],
+        );
+
         let backward_deriv_pass_info = ConvPassInfo::new(
             backward_deriv_dir_buffer,
             backward_deriv_shader,
@@ -1224,12 +1528,21 @@ impl ConvDispatch {
             vec![8, 8, 1],
         );
 
-        let gradient_acc_pass_info = ConvPassInfo::new(
-            gradient_acc_dir_buffer,
-            gradient_acc_shader,
-            gradient_acc_bind_group,
-            gradient_acc_pipeline,
-            gradient_acc_slot,
+        let weight_gradient_acc_pass_info = ConvPassInfo::new(
+            weight_gradient_acc_dir_buffer,
+            weight_gradient_acc_shader,
+            weight_gradient_acc_bind_group,
+            weight_gradient_acc_pipeline,
+            weight_gradient_acc_slot,
+            vec![32, 0, 0],
+        );
+
+        let bias_gradient_acc_pass_info = ConvPassInfo::new(
+            bias_gradient_acc_dir_buffer,
+            bias_gradient_acc_shader,
+            bias_gradient_acc_bind_group,
+            bias_gradient_acc_pipeline,
+            bias_gradient_acc_slot,
             vec![32, 0, 0],
         );
 
@@ -1256,11 +1569,14 @@ impl ConvDispatch {
             forward_mat_pass_info,
             forward_pool_pass_info,
 
-            backward_gradient_pass_info,
+            backward_weight_gradient_pass_info,
+            backward_bias_gradient_pass_info,
+
             backward_deriv_pass_info,
             backward_pool_pass_info,
 
-            gradient_acc_pass_info,
+            weight_gradient_acc_pass_info,
+            bias_gradient_acc_pass_info,
             momentum_pass_info,
 
             conv_info,
@@ -1316,14 +1632,18 @@ impl ConvDispatch {
 
             let layer_i = 0;
 
-            let dyn_off = layer_i as u32 * self.gradient_acc_pass_info.dir_slot_size as u32;
-            pass.set_pipeline(&self.gradient_acc_pass_info.pipeline);
-            pass.set_bind_group(0, &self.gradient_acc_pass_info.bind_group, &[dyn_off]);
+            let dyn_off = layer_i as u32 * self.weight_gradient_acc_pass_info.dir_slot_size as u32;
+            pass.set_pipeline(&self.weight_gradient_acc_pass_info.pipeline);
+            pass.set_bind_group(
+                0,
+                &self.weight_gradient_acc_pass_info.bind_group,
+                &[dyn_off],
+            );
 
             let gx = ceil_div(
                 self.conv_info.conv_layers[layer_i].n_kernals
                     * self.conv_info.conv_layers[layer_i].kernal_info.size,
-                self.gradient_acc_pass_info.workgroup_dim.x,
+                self.weight_gradient_acc_pass_info.workgroup_dim.x,
             );
 
             pass.dispatch_workgroups(gx as u32, 1, 1);
@@ -1349,19 +1669,24 @@ impl ConvDispatch {
 
             let layer_i = self.conv_info.n_layers - 3;
 
-            let dyn_off = layer_i as u32 * self.backward_gradient_pass_info.dir_slot_size as u32;
-            pass.set_pipeline(&self.backward_gradient_pass_info.pipeline);
-            pass.set_bind_group(0, &self.backward_gradient_pass_info.bind_group, &[dyn_off]);
+            let dyn_off =
+                layer_i as u32 * self.backward_bias_gradient_pass_info.dir_slot_size as u32;
+            pass.set_pipeline(&self.backward_bias_gradient_pass_info.pipeline);
+            pass.set_bind_group(
+                0,
+                &self.backward_bias_gradient_pass_info.bind_group,
+                &[dyn_off],
+            );
 
             let conv_layer = &self.conv_info.conv_layers[layer_i];
 
             let gx = ceil_div(
                 conv_layer.n_kernals,
-                self.backward_gradient_pass_info.workgroup_dim.x,
+                self.backward_bias_gradient_pass_info.workgroup_dim.x,
             );
             let gy = ceil_div(
                 conv_layer.kernal_info.size,
-                self.backward_gradient_pass_info.workgroup_dim.y,
+                self.backward_bias_gradient_pass_info.workgroup_dim.y,
             );
 
             println!("{} {}", gy, conv_layer.acc_length);
@@ -1544,39 +1869,88 @@ impl ConvDispatch {
                     );
                 }
 
-                // Gradient Calc
+                // Weight Gradient Calc
                 {
-                    let dyn_off: u32 =
-                        layer_i as u32 * self.backward_gradient_pass_info.dir_slot_size as u32;
+                    let dyn_off: u32 = layer_i as u32
+                        * self.backward_weight_gradient_pass_info.dir_slot_size as u32;
 
-                    pass.set_pipeline(&self.backward_gradient_pass_info.pipeline);
+                    pass.set_pipeline(&self.backward_weight_gradient_pass_info.pipeline);
                     pass.set_bind_group(
                         0,
-                        &self.backward_gradient_pass_info.bind_group,
+                        &self.backward_weight_gradient_pass_info.bind_group,
                         &[dyn_off],
                     );
 
                     let gx = ceil_div(
                         conv_layer.n_kernals,
-                        self.backward_gradient_pass_info.workgroup_dim.x,
+                        self.backward_weight_gradient_pass_info.workgroup_dim.x,
                     );
                     let gy = ceil_div(
                         conv_layer.kernal_info.size,
-                        self.backward_gradient_pass_info.workgroup_dim.y,
+                        self.backward_weight_gradient_pass_info.workgroup_dim.y,
                     );
 
                     pass.dispatch_workgroups(gx as u32, gy as u32, conv_layer.acc_length as u32);
                 }
 
-                // Gradient Accumulate
+                // Weight Gradient Accumulate
                 {
-                    let dyn_off = layer_i as u32 * self.gradient_acc_pass_info.dir_slot_size as u32;
-                    pass.set_pipeline(&self.gradient_acc_pass_info.pipeline);
-                    pass.set_bind_group(0, &self.gradient_acc_pass_info.bind_group, &[dyn_off]);
+                    let dyn_off =
+                        layer_i as u32 * self.weight_gradient_acc_pass_info.dir_slot_size as u32;
+                    pass.set_pipeline(&self.weight_gradient_acc_pass_info.pipeline);
+                    pass.set_bind_group(
+                        0,
+                        &self.weight_gradient_acc_pass_info.bind_group,
+                        &[dyn_off],
+                    );
 
                     let gx = ceil_div(
                         conv_layer.n_kernals * conv_layer.kernal_info.size,
-                        self.gradient_acc_pass_info.workgroup_dim.x,
+                        self.weight_gradient_acc_pass_info.workgroup_dim.x,
+                    );
+
+                    pass.dispatch_workgroups(gx as u32, 1, 1);
+                }
+
+                // Bias Gradient Calc
+                {
+                    let dyn_off: u32 =
+                        layer_i as u32 * self.backward_bias_gradient_pass_info.dir_slot_size as u32;
+
+                    pass.set_pipeline(&self.backward_bias_gradient_pass_info.pipeline);
+                    pass.set_bind_group(
+                        0,
+                        &self.backward_bias_gradient_pass_info.bind_group,
+                        &[dyn_off],
+                    );
+
+                    let gx = ceil_div(
+                        conv_layer.n_kernals,
+                        self.backward_bias_gradient_pass_info.workgroup_dim.x,
+                    );
+
+                    let gy = ceil_div(
+                        conv_layer.acc_length,
+                        self.backward_bias_gradient_pass_info.workgroup_dim.y,
+                    );
+
+                    pass.dispatch_workgroups(gx as u32, gy as u32, 1);
+                }
+
+                // Bias Gradient Accumulate
+                {
+                    let dyn_off =
+                        layer_i as u32 * self.bias_gradient_acc_pass_info.dir_slot_size as u32;
+                    pass.set_pipeline(&self.bias_gradient_acc_pass_info.pipeline);
+                    pass.set_bind_group(
+                        0,
+                        &self.bias_gradient_acc_pass_info.bind_group,
+                        &[dyn_off],
+                    );
+
+                    let gx = ceil_div(
+                        conv_layer.n_kernals,
+                        self.bias_gradient_acc_pass_info.workgroup_dim.x,
                     );
 
                     pass.dispatch_workgroups(gx as u32, 1, 1);
@@ -1616,9 +1990,11 @@ impl ConvDispatch {
 
         // 0 - deriv (un pool)
         // 1 - deriv (deriv calc)
-        // 2 - gradient
+        // 2 - weight gradient
+        // 3 - bias gradient
+        // 4 - forward outputs
 
-        let read_type = 2;
+        let read_type = 3;
 
         let mut start_idx = 0;
         let mut layer_size = 0;
@@ -1632,7 +2008,7 @@ impl ConvDispatch {
                 self.conv_info.activity_info.deriv_buffer_size as u64 * 4 * 2,
             );
 
-            start_idx = 0;
+            start_idx = self.conv_info.activity_info.batch_swap_buffer_size * 0;
             layer_size = 28;
         } else if read_type == 1 {
             encoder.copy_buffer_to_buffer(
@@ -1656,6 +2032,30 @@ impl ConvDispatch {
 
             start_idx = self.conv_info.param_info.k_strides[0];
             layer_size = 8;
+        } else if read_type == 3 {
+            encoder.copy_buffer_to_buffer(
+                &self.gradient_buffer,
+                0,
+                &self.out_buffer,
+                0,
+                self.conv_info.param_info.size as u64 * 4,
+            );
+
+            start_idx = self.conv_info.param_info.b_offset + self.conv_info.param_info.b_strides[0];
+            layer_size = self.conv_info.conv_layers[0].n_kernals;
+
+            println!("{} {}", start_idx, self.conv_info.param_info.size);
+        } else if read_type == 4 {
+            encoder.copy_buffer_to_buffer(
+                &self.conv_output_swap_buffer,
+                0,
+                &self.out_buffer,
+                0,
+                self.conv_info.activity_info.swap_buffer_size as u64 * 4 * 2,
+            );
+
+            start_idx = 0;
+            layer_size = 7;
         }
 
         gpu_instance.queue.submit(Some(encoder.finish()));
@@ -1673,7 +2073,7 @@ impl ConvDispatch {
         // let start_idx = self.conv_info.activity_info.strides[2];
 
         // let layer_size = 4;
-        let check_n_layers = 30;
+        let check_n_layers = 60;
 
         let mut prev_idx = start_idx;
         let mut curr_idx = prev_idx + layer_size;

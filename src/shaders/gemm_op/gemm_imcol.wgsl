@@ -110,9 +110,9 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
 
 
     if !is_dead{
-        // v += read_buffer1[mat_dir.c_start + g_n];
+        v += param_buffer[mat_dir.c_start + g_n];
 
-        // v = ReLu(v);
+        v = ReLu(v);
         let write_idx = g_n * mat_dir.n_outputs + batch_g_m;
 
         swap_buffer[mat_dir.write_start + batch_buffer_offset + write_idx] = v;

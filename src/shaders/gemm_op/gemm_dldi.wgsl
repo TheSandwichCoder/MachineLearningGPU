@@ -5,13 +5,13 @@ struct MatrixDir{
     o_layer_dim: vec4<u32>,
 
     kernal_read_start: u32,
+    input_read_start: u32,
     layer_read_start: u32,
     write_start: u32,
 
-    c_start: u32,
-
     n_outputs: u32, // number of outputs for a single batch
     batch_swap_buffer_size: u32, // size of the swap buffer for a single input
+    batch_input_buffer_size: u32, // size of the input buffer for a single batch
 
     kernal_layer_size: u32, // number of values in the 2d kernal
     kernal_size: u32, // number of values in the kernal (offset)
@@ -22,9 +22,10 @@ struct MatrixDir{
 }
 
 @group(0) @binding(0) var<storage, read> param_buffer: array<f32>;
-@group(0) @binding(1) var<storage, read_write> deriv_swap_buffer: array<f32>;
+@group(0) @binding(1) var<storage, read> input_storage_buffer: array<f32>;
+@group(0) @binding(2) var<storage, read_write> deriv_swap_buffer: array<f32>;
 
-@group(0) @binding(2) var <uniform> mat_dir: MatrixDir;
+@group(0) @binding(3) var <uniform> mat_dir: MatrixDir;
 
 // all the same (I suck at coding)
 const T_K : u32 = 16;
@@ -110,11 +111,9 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
 
             if read_idx == -1{
                 b_sub[t_n][t_m] = 0.0;
-                // b_sub[t_n][t_m] = deriv_swap_buffer[mat_dir.layer_read_start + u32(read_idx) + batch_buffer_offset];
             }
             else{
                 b_sub[t_n][t_m] = deriv_swap_buffer[mat_dir.layer_read_start + u32(read_idx) + batch_buffer_offset];
-                // b_sub[t_n][t_m] = 1.0;
             }
         }    
         
@@ -137,11 +136,13 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
 
 
     if !is_dead{
-        // v += read_buffer1[mat_dir.c_start + g_n];
-
-        // v = ReLu(v);
-
         let write_idx = g_n * mat_dir.n_outputs + batch_g_m;
+
+        let input_batch_buffer_offset = batch_i * mat_dir.batch_input_buffer_size;
+
+        let a = input_storage_buffer[mat_dir.input_read_start + write_idx + input_batch_buffer_offset];
+        v *= dReLu(a);
+
 
         deriv_swap_buffer[mat_dir.write_start + u32(write_idx) + batch_buffer_offset] = v;
     }

@@ -548,6 +548,13 @@ impl ConvParamInfo {
             empty_vec[i] = ((i - self.k_strides[1]) as f32 - 32.0) / 64.0;
         }
 
+        for i in self.b_offset..(self.b_offset + self.b_strides[1]) {
+            empty_vec[i] = (i - self.b_offset) as f32;
+        }
+        for i in (self.b_offset + self.b_strides[1])..(self.b_offset + self.b_strides[2]) {
+            empty_vec[i] = (i - (self.b_offset + self.b_strides[1])) as f32;
+        }
+
         // println!("{:?}", &empty_vec[self.k_strides[1]..self.k_strides[2]]);
 
         return empty_vec;
