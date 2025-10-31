@@ -1,6 +1,8 @@
 use rand::Rng;
 
 use crate::functions::*;
+use crate::model;
+use crate::model::ModelConstructor;
 use crate::range::*;
 use crate::tensor::*;
 
@@ -30,7 +32,7 @@ Pool Dim:
 
 // CONSTRUCTOR
 #[derive(Clone)]
-pub struct ConvolutionConstructor {
+pub struct ConvConstructor {
     pub i_x: usize,
     pub i_y: usize,
     pub i_c: usize,
@@ -46,9 +48,9 @@ pub struct ConvolutionConstructor {
     pub mr: f32,
 }
 
-impl ConvolutionConstructor {
+impl ConvConstructor {
     pub fn default() -> Self {
-        return ConvolutionConstructor {
+        return ConvConstructor {
             i_x: 0,
             i_y: 0,
             i_c: 0,
@@ -65,24 +67,34 @@ impl ConvolutionConstructor {
         };
     }
 
+    pub fn from_model_constructor(model_constructor: &ModelConstructor) -> Self {
+        return ConvConstructor {
+            i_x: model_constructor.conv_input_layer_dim[0],
+            i_y: model_constructor.conv_input_layer_dim[1],
+            i_c: model_constructor.conv_input_layer_dim[2],
+            n_layers: model_constructor.conv_n_layers,
+            n_batches: model_constructor.n_batches as usize,
+            split_k: 16,
+            pooling_dim: model_constructor.conv_pooling_dim.clone(),
+            kernal_dim: model_constructor.conv_kernal_dim.clone(),
+            layer_output: model_constructor.conv_layer_output.clone(),
+            lr: model_constructor.lr,
+            mr: model_constructor.mr,
+        };
+    }
+
+    pub fn add_layer(&mut self, kernal_size: usize, pool_size: usize, n_kernals: usize) {
+        self.kernal_dim.push(kernal_size);
+        self.pooling_dim.push(pool_size);
+        self.layer_output.push(n_kernals);
+    }
+
     pub fn set_inputs(&mut self, input_dim: Vec<usize>, n_layers: usize) {
         self.i_x = input_dim[0];
         self.i_y = input_dim[1];
         self.i_c = input_dim[2];
 
         self.n_layers = n_layers;
-    }
-
-    pub fn set_pool(&mut self, pool_dim: Vec<usize>) {
-        self.pooling_dim = pool_dim;
-    }
-
-    pub fn set_kernal(&mut self, kernal_dim: Vec<usize>) {
-        self.kernal_dim = kernal_dim;
-    }
-
-    pub fn set_outputs(&mut self, layer_output: Vec<usize>) {
-        self.layer_output = layer_output;
     }
 
     pub fn set_n_batches(&mut self, n_batches: usize) {
@@ -114,7 +126,7 @@ pub struct ConvolutionInfo {
 }
 
 impl ConvolutionInfo {
-    pub fn construct(constructor: ConvolutionConstructor) -> Self {
+    pub fn construct(constructor: &ConvConstructor) -> Self {
         let mut conv_layers = Vec::new();
 
         let mut prev_x = constructor.i_x;
@@ -375,7 +387,6 @@ impl ConvActivityInfo {
         let mut layer_dim = Vec::new();
 
         let swap_buffer_size = largest_layer * n_batches;
-        println!("asdkjfhsdakjfh {}", largest_layer);
         // storage buffer
         let mut stride_offset = 0;
 

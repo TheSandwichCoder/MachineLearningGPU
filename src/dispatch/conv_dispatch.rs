@@ -1,3 +1,4 @@
+use crate::data_reader::DataConstructor;
 use crate::datatypes::{conv_datatypes::*, workgroup::*};
 use crate::functions::*;
 use crate::gpu_dirs::{conv_dirs::*, nn_dirs::FlatApplyDir};
@@ -74,7 +75,11 @@ pub struct ConvDispatch {
 }
 
 impl ConvDispatch {
-    pub fn new(gpu_instance: &GPUInstance, conv_constructor: ConvolutionConstructor) -> Self {
+    pub fn new(
+        gpu_instance: &GPUInstance,
+        conv_constructor: &ConvConstructor,
+        data_constructor: &DataConstructor,
+    ) -> Self {
         // -------------------Convolution Info-------------------
         let conv_info = ConvolutionInfo::construct(conv_constructor);
 

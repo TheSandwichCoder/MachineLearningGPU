@@ -119,8 +119,6 @@ impl Im2ColDir_BG {
         let curr_conv_layer = &conv_info.conv_layers[dir_i];
         let next_conv_layer = &conv_info.conv_layers[dir_i + 1];
 
-        println!("{:?}", &curr_conv_layer.layer_dim);
-
         return Im2ColDir_BG {
             kernal: [
                 curr_conv_layer.kernal_info.dim[0] as u32,
@@ -303,8 +301,6 @@ impl PoolDir {
     pub fn backward_new(conv_info: &ConvolutionInfo, dir_i: usize) -> Self {
         let conv_layer = &conv_info.conv_layers[dir_i];
         let next_conv_layer = &conv_info.conv_layers[dir_i + 1];
-
-        println!("o dim {:?}", &next_conv_layer.layer_dim);
 
         return PoolDir {
             i_layer_dim: [

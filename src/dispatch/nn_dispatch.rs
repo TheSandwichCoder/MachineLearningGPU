@@ -3,7 +3,7 @@ use std::fs;
 use std::num::NonZeroU64;
 use wgpu::util::DeviceExt;
 
-use crate::data_reader::DataReader;
+use crate::data_reader::*;
 use crate::datatypes::*;
 use crate::datatypes::{nn_datatypes::*, workgroup::*};
 use crate::dispatch::gpu_instance::*;
@@ -72,16 +72,16 @@ pub struct NNDispatch {
 impl NNDispatch {
     pub fn new(
         gpu_instance: &GPUInstance,
-        nn_dim: &Vec<usize>,
-        n_batches: u32,
-        data_path: String,
-        data_per_batch: u32,
-        learning_rate: f32,
-        momentum_rate: f32,
+        nn_constructor: &NNConstructor,
+        data_constructor: &DataConstructor,
     ) -> Self {
         // ---------------------Neural Network Info---------------------
-        let nn_info =
-            NeuralNetworkInfo::new(nn_dim, n_batches as usize, learning_rate, momentum_rate);
+        let nn_info = NeuralNetworkInfo::new(
+            &nn_constructor.nn_dim,
+            nn_constructor.n_batches as usize,
+            nn_constructor.lr,
+            nn_constructor.mr,
+        );
 
         let (p_dir, a_dir) = nn_info.create_dirs();
 
@@ -89,9 +89,9 @@ impl NNDispatch {
 
         // ---------------------Data Reader---------------------
         let mut data_reader = DataReader::new(
-            data_path,
-            (n_batches * data_per_batch) as usize,
-            n_batches as usize,
+            data_constructor.data_path.clone(),
+            (nn_constructor.n_batches * data_constructor.data_per_batch) as usize,
+            nn_constructor.n_batches as usize,
         );
         // data_reader.initialise_params_debug();
         // data_reader.load_batch_debug();
