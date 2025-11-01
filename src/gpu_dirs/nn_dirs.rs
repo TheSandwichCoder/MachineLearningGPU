@@ -1,6 +1,7 @@
 use crate::data_reader::*;
 use crate::datatypes::{conv_datatypes::*, nn_datatypes::*};
 use bytemuck::{Pod, Zeroable};
+use csv::Error;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]

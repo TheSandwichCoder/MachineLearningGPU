@@ -5,13 +5,15 @@ use crate::model::ModelConstructor;
 pub struct DataConstructor {
     pub data_path: String,
     pub data_per_batch: usize,
+    pub n_batches: usize,
 }
 
 impl DataConstructor {
-    pub fn new(data_path: String, data_per_batch: usize) -> Self {
+    pub fn new(data_path: String, data_per_batch: usize, n_batches: usize) -> Self {
         return DataConstructor {
             data_path: data_path,
             data_per_batch: data_per_batch,
+            n_batches: n_batches,
         };
     }
 
@@ -19,6 +21,7 @@ impl DataConstructor {
         return DataConstructor {
             data_path: model_constructor.data_path.clone(),
             data_per_batch: model_constructor.n_data_per_batch,
+            n_batches: model_constructor.n_batches,
         };
     }
 }
@@ -93,9 +96,18 @@ pub struct DataReader {
     pub sub_batch_length: usize,  // number of data values in a sub batch
 
     pub data_value_size: usize,
+    pub n_batches: usize, // literally nuber of batches run in the model
 }
 
 impl DataReader {
+    pub fn construct(data_constructor: &DataConstructor) -> Self {
+        return DataReader::new(
+            data_constructor.data_path.clone(),
+            (data_constructor.n_batches * data_constructor.data_per_batch) as usize,
+            data_constructor.n_batches,
+        );
+    }
+
     pub fn new(data_path: String, load_batch_length: usize, sub_batch_length: usize) -> Self {
         return DataReader {
             data_path,
@@ -113,6 +125,7 @@ impl DataReader {
             sub_batch_length: sub_batch_length,
 
             data_value_size: 0,
+            n_batches: sub_batch_length,
         };
     }
 

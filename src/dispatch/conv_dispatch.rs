@@ -1,5 +1,7 @@
 use crate::data_reader::DataConstructor;
 use crate::datatypes::{conv_datatypes::*, workgroup::*};
+use crate::dispatch::conv_dispatch;
+use crate::dispatch::nn_dispatch::NNDispatch;
 use crate::functions::*;
 use crate::gpu_dirs::{conv_dirs::*, nn_dirs::FlatApplyDir};
 use bytemuck::{Pod, Zeroable};
@@ -75,6 +77,14 @@ pub struct ConvDispatch {
 }
 
 impl ConvDispatch {
+    pub fn get_act_buffer_ref(&self) -> &wgpu::Buffer {
+        return &self.conv_output_swap_buffer;
+    }
+
+    pub fn get_storage_buffer_ref(&self) -> &wgpu::Buffer {
+        return &self.o_storage_buffer;
+    }
+
     pub fn new(
         gpu_instance: &GPUInstance,
         conv_constructor: &ConvConstructor,
@@ -1830,7 +1840,34 @@ impl ConvDispatch {
         gpu_instance.queue.submit([forward_commands]);
     }
 
-    pub fn set_data(&self, gpu_instance: &GPUInstance) {}
+    pub fn transfer_nn_deriv(&self, gpu_instance: &GPUInstance, nn_dispatch: &NNDispatch) {
+        let mut encoder =
+            gpu_instance
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("encoder"),
+                });
+
+        let nn_info = &nn_dispatch.nn_info;
+        let data_length = nn_info.layer_dim[0];
+
+        for batch_i in 0..self.conv_info.n_batches {
+            let write_i_swap = self.conv_info.activity_info.deriv_buffer_size
+                + batch_i * self.conv_info.activity_info.batch_swap_buffer_size;
+
+            let read_i = nn_info.activity_info.d_start + nn_info.activity_info.a_deriv_buffer_size;
+
+            encoder.copy_buffer_to_buffer(
+                &nn_dispatch.get_act_buffer_ref(),
+                (read_i * 4) as u64,
+                &self.conv_deriv_swap_buffer,
+                (write_i_swap * 4) as u64,
+                (data_length * 4) as u64,
+            );
+        }
+
+        gpu_instance.queue.submit([encoder.finish()]);
+    }
 
     pub fn backward_conv_full(&self, gpu_instance: &GPUInstance) {
         let mut encoder =
