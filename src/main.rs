@@ -29,10 +29,10 @@ fn main() {
     model_construct.set_conv_n_layers(3);
     model_construct.set_conv_input_layer_dim(vec![28, 28, 1]);
 
-    model_construct.add_kernal_layer(8, 2, 10);
-    model_construct.add_kernal_layer(4, 2, 1);
+    model_construct.add_kernal_layer(4, 2, 16);
+    model_construct.add_kernal_layer(2, 1, 8);
 
-    model_construct.set_nn_dim(vec![0, 32, 10]);
+    model_construct.set_nn_dim(vec![0, 128, 64, 10]);
 
     model_construct.set_datapath(String::from("datasets/mnist_numbers.csv"));
     model_construct.load_all_data(42000);
@@ -47,7 +47,11 @@ fn main() {
 
     convnn_model.show_all_specs();
 
-    convnn_model.debug();
+    convnn_model.train();
+    convnn_model.test();
+    convnn_model.save();
+
+    // convnn_model.debug();
 
     // let gpu_instance = pollster::block_on(GPUInstance::new());
     // let mut conv_dispatch = ConvDispatch::new(&gpu_instance, conv_construct);

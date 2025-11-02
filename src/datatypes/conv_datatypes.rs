@@ -5,6 +5,7 @@ use crate::model;
 use crate::model::ModelConstructor;
 use crate::range::*;
 use crate::tensor::*;
+use itertools::Itertools;
 
 /*
 IMPORTANT TO NOTE
@@ -251,6 +252,45 @@ impl ConvolutionInfo {
         println!("Param Kernal Strides: {:?}", self.param_info.k_strides);
         println!("Param Bias Strides: {:?}", self.param_info.b_strides);
         println!("Total Buffer Length: {} floats", self.param_info.size);
+    }
+
+    pub fn get_save_string(&self, param_slice: &[f32]) -> String {
+        let mut layer_i = 0;
+        let mut save_string = String::new();
+
+        save_string += &format!("{}\n", self.n_layers - 1);
+
+        for layer_i in 0..self.n_layers - 1 {
+            let conv_layer = &self.conv_layers[layer_i];
+            save_string += &format!(
+                "{} {} {} {} {}\n",
+                conv_layer.kernal_info.dim[0],
+                conv_layer.kernal_info.dim[1],
+                conv_layer.kernal_info.dim[2],
+                conv_layer.n_kernals,
+                conv_layer.pooling_info.k
+            );
+        }
+
+        for layer_info_i in 0..self.n_layers - 1 {
+            let conv_layer = &self.conv_layers[layer_info_i];
+            let kernal = &conv_layer.kernal_info;
+
+            for kernal_i in 0..conv_layer.n_kernals {
+                let start_i = self.param_info.k_strides[layer_info_i] + kernal.size * kernal_i;
+                let end_i = self.param_info.k_strides[layer_info_i] + kernal.size * (kernal_i + 1);
+
+                let bias_i = self.param_info.b_strides[layer_info_i] + kernal_i;
+
+                save_string += &format!(
+                    "{} {}\n",
+                    param_slice[start_i..end_i].iter().join(" "),
+                    param_slice[bias_i]
+                );
+            }
+        }
+
+        return save_string;
     }
 }
 
@@ -550,33 +590,31 @@ impl ConvParamInfo {
 
     // weights for the model
     pub fn create_buffer(&self) -> Vec<f32> {
-        let mut empty_vec = vec![1.0; self.size];
+        // let mut empty_vec = vec![1.0; self.size];
 
-        for i in 0..self.k_strides[1] {
-            empty_vec[i] = (i as f32 - 32.0) / 64.0;
-        }
-        for i in self.k_strides[1]..self.k_strides[2] {
-            empty_vec[i] = ((i - self.k_strides[1]) as f32 - 32.0) / 64.0;
-        }
+        // for i in 0..self.k_strides[1] {
+        //     empty_vec[i] = (i as f32 - 32.0) / 64.0;
+        // }
+        // for i in self.k_strides[1]..self.k_strides[2] {
+        //     empty_vec[i] = ((i - self.k_strides[1]) as f32 - 32.0) / 64.0;
+        // }
 
-        for i in self.b_offset..(self.b_offset + self.b_strides[1]) {
-            empty_vec[i] = (i - self.b_offset) as f32;
-        }
-        for i in (self.b_offset + self.b_strides[1])..(self.b_offset + self.b_strides[2]) {
-            empty_vec[i] = (i - (self.b_offset + self.b_strides[1])) as f32;
-        }
+        // for i in self.b_offset..(self.b_offset + self.b_strides[1]) {
+        //     empty_vec[i] = (i - self.b_offset) as f32;
+        // }
+        // for i in (self.b_offset + self.b_strides[1])..(self.b_offset + self.b_strides[2]) {
+        //     empty_vec[i] = (i - (self.b_offset + self.b_strides[1])) as f32;
+        // }
 
-        // println!("{:?}", &empty_vec[self.k_strides[1]..self.k_strides[2]]);
+        // // println!("{:?}", &empty_vec[self.k_strides[1]..self.k_strides[2]]);
 
-        return empty_vec;
+        // return empty_vec;
 
-        // let mut rng = rand::thread_rng();
+        let mut rng = rand::thread_rng();
 
-        // let random_floats: Vec<f32> = (0..self.size)
-        //     .map(|_| rng.gen_range(-1.0..=1.0))
-        //     .collect();
+        let random_floats: Vec<f32> = (0..self.size).map(|_| rng.gen_range(-1.0..=1.0)).collect();
 
-        // return random_floats;
+        return random_floats;
     }
 
     pub fn create_accumulate_buffer_empty(&self, n_batches: usize) -> Vec<f32> {

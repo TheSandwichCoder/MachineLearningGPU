@@ -2024,6 +2024,37 @@ impl ConvDispatch {
         gpu_instance.queue.submit([backwards_commands]);
     }
 
+    pub fn get_param_slice(&self, gpu_instance: &GPUInstance) -> Vec<f32> {
+        let mut encoder =
+            gpu_instance
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("encoder"),
+                });
+
+        encoder.copy_buffer_to_buffer(
+            &self.param_buffer,
+            0,
+            &self.out_buffer,
+            0,
+            self.conv_info.param_info.size as u64 * 4,
+        );
+
+        gpu_instance.queue.submit(Some(encoder.finish()));
+
+        let slice = self.out_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| ());
+        gpu_instance.device.poll(wgpu::PollType::Wait).unwrap();
+
+        // Now it's safe to read.
+        let data = slice.get_mapped_range();
+        let out: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
+
+        drop(data);
+
+        return out;
+    }
+
     pub fn read_back_act_single(&self, gpu_instance: &GPUInstance) {
         let mut encoder =
             gpu_instance

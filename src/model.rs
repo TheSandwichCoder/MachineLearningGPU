@@ -6,6 +6,8 @@ use crate::dispatch::data_dispatch::DataDispatch;
 use crate::dispatch::{conv_dispatch::*, gpu_instance::*, nn_dispatch::*};
 use std::time::{Duration, Instant};
 
+use std::fs;
+
 #[derive(Clone)]
 pub struct ModelConstructor {
     pub nn_dim: Vec<usize>,
@@ -378,5 +380,19 @@ impl ConvNNModel {
         println!("{:?}", t0.elapsed());
 
         self.data_dispatch.read_back_metrics(&self.gpu_instance);
+    }
+
+    pub fn save(&self) {
+        let nn_params = self.nn_dispatch.get_param_slice(&self.gpu_instance);
+        let conv_params = self.conv_dispatch.get_param_slice(&self.gpu_instance);
+
+        let nn_save_string = self.nn_dispatch.nn_info.get_save_string(&nn_params);
+        let conv_save_string = self.conv_dispatch.conv_info.get_save_string(&conv_params);
+
+        // println!("{} {}", nn_save_string, conv_save_string);
+
+        let save_string = nn_save_string + &conv_save_string;
+
+        fs::write("./saves/saved_convnn.txt", save_string);
     }
 }

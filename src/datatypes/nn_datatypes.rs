@@ -404,13 +404,13 @@ impl ParamsDir {
     }
 
     pub fn create_buffer(&self) -> Vec<f32> {
-        let mut out: Vec<f32> = Vec::new();
+        // let mut out: Vec<f32> = Vec::new();
 
-        for i in 0..self.buffer_size {
-            out.push(i as f32 / 1000.0);
-        }
+        // for i in 0..self.buffer_size {
+        //     out.push(i as f32 / 1000.0);
+        // }
 
-        return out;
+        // return out;
 
         let mut rng = rand::thread_rng();
 
