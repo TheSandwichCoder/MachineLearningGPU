@@ -1855,7 +1855,9 @@ impl ConvDispatch {
             let write_i_swap = self.conv_info.activity_info.deriv_buffer_size
                 + batch_i * self.conv_info.activity_info.batch_swap_buffer_size;
 
-            let read_i = nn_info.activity_info.d_start + nn_info.activity_info.a_deriv_buffer_size;
+            let read_i = nn_info.activity_info.d_start
+                + nn_info.activity_info.a_deriv_buffer_size
+                + batch_i * nn_info.activity_info.a_length;
 
             encoder.copy_buffer_to_buffer(
                 &nn_dispatch.get_act_buffer_ref(),
@@ -2035,8 +2037,10 @@ impl ConvDispatch {
         // 2 - weight gradient
         // 3 - bias gradient
         // 4 - forward outputs
+        // 5 - weights
+        // 6 - bias
 
-        let read_type = 3;
+        let read_type = 6;
 
         let mut start_idx = 0;
         let mut layer_size = 0;
@@ -2061,8 +2065,9 @@ impl ConvDispatch {
                 self.conv_info.activity_info.deriv_buffer_size as u64 * 4 * 2,
             );
 
-            start_idx = self.conv_info.activity_info.deriv_buffer_size;
-            layer_size = 14;
+            start_idx = self.conv_info.activity_info.deriv_buffer_size
+                + self.conv_info.activity_info.batch_swap_buffer_size * 0;
+            layer_size = 7;
         } else if read_type == 2 {
             encoder.copy_buffer_to_buffer(
                 &self.gradient_buffer,
@@ -2072,8 +2077,8 @@ impl ConvDispatch {
                 self.conv_info.param_info.size as u64 * 4,
             );
 
-            start_idx = self.conv_info.param_info.k_strides[0];
-            layer_size = 8;
+            start_idx = self.conv_info.param_info.k_strides[1];
+            layer_size = 4;
         } else if read_type == 3 {
             encoder.copy_buffer_to_buffer(
                 &self.gradient_buffer,
@@ -2096,8 +2101,30 @@ impl ConvDispatch {
                 self.conv_info.activity_info.swap_buffer_size as u64 * 4 * 2,
             );
 
-            start_idx = 0;
+            start_idx = self.conv_info.activity_info.batch_swap_buffer_size * 0;
             layer_size = 7;
+        } else if read_type == 5 {
+            encoder.copy_buffer_to_buffer(
+                &self.param_buffer,
+                0,
+                &self.out_buffer,
+                0,
+                self.conv_info.param_info.size as u64 * 4,
+            );
+
+            start_idx = self.conv_info.param_info.k_strides[1];
+            layer_size = 4;
+        } else if read_type == 6 {
+            encoder.copy_buffer_to_buffer(
+                &self.param_buffer,
+                0,
+                &self.out_buffer,
+                0,
+                self.conv_info.param_info.size as u64 * 4,
+            );
+
+            start_idx = self.conv_info.param_info.b_offset + self.conv_info.param_info.b_strides[0];
+            layer_size = 28;
         }
 
         gpu_instance.queue.submit(Some(encoder.finish()));

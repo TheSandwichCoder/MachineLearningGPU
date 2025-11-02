@@ -749,7 +749,7 @@ impl DataDispatch {
         let conv_info = &conv_dispatch.conv_info;
 
         for batch_i in 0..self.data_reader.n_batches {
-            let write_i_swap = batch_i * conv_info.activity_info.dim[0].tens_length;
+            let write_i_swap = batch_i * conv_info.activity_info.batch_swap_buffer_size;
             let write_i_storage = batch_i * conv_info.activity_info.dim[0].tens_length;
 
             let read_i = batch_i * (self.data_reader.data_value_size + 1) + curr_batch_start + 1; // plus one to skip the label

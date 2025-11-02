@@ -278,8 +278,7 @@ impl NNDispatch {
         // |                                                        |
         // +--------------------------------------------------------+
 
-        let backward_deriv_mat_dir_buffer_size =
-            gemm_mat_slot * (nn_info.get_n_layers() - 1) as u64;
+        let backward_deriv_mat_dir_buffer_size = gemm_mat_slot * nn_info.get_n_layers() as u64;
 
         let backward_deriv_mat_dir_buffer =
             gpu_instance.device.create_buffer(&wgpu::BufferDescriptor {
@@ -330,12 +329,12 @@ impl NNDispatch {
 
         // ---------------------Update Meta---------------------
 
-        for layer_i in 1..nn_info.get_n_layers() {
+        for layer_i in 0..nn_info.get_n_layers() {
             let mat_dir = MatrixDir::new_backward_deriv(&nn_info, layer_i);
 
             gpu_instance.queue.write_buffer(
                 &backward_deriv_mat_dir_buffer,
-                (layer_i - 1) as u64 * gemm_mat_slot,
+                layer_i as u64 * gemm_mat_slot,
                 bytemuck::bytes_of(&mat_dir),
             );
         }
@@ -710,11 +709,11 @@ impl NNDispatch {
             });
 
             for layer_i in (1..self.nn_info.get_n_layers()).rev() {
-                let dyn_off =
-                    (layer_i - 1) as u32 * self.backward_deriv_mat_pass_info.dir_slot_size as u32;
-
-                pass.set_pipeline(&self.backward_deriv_mat_pass_info.pipeline);
                 if layer_i != self.nn_info.get_n_layers() - 1 {
+                    let dyn_off =
+                        layer_i as u32 * self.backward_deriv_mat_pass_info.dir_slot_size as u32;
+
+                    pass.set_pipeline(&self.backward_deriv_mat_pass_info.pipeline);
                     pass.set_bind_group(
                         0,
                         &self.backward_deriv_mat_pass_info.bind_group,
@@ -733,24 +732,98 @@ impl NNDispatch {
                     pass.dispatch_workgroups(gx as u32, gy as u32, 1);
                 }
 
-                pass.set_pipeline(&self.backward_gradient_mat_pass_info.pipeline);
+                {
+                    let dyn_off = (layer_i - 1) as u32
+                        * self.backward_gradient_mat_pass_info.dir_slot_size as u32;
 
-                pass.set_bind_group(
-                    0,
-                    &self.backward_gradient_mat_pass_info.bind_group,
-                    &[dyn_off],
-                );
+                    pass.set_pipeline(&self.backward_gradient_mat_pass_info.pipeline);
 
-                let gx = ceil_div(
-                    self.nn_info.layer_dim[layer_i],
-                    self.backward_gradient_mat_pass_info.workgroup_dim.x,
-                );
-                let gy = ceil_div(
-                    self.nn_info.layer_dim[layer_i - 1],
-                    self.backward_gradient_mat_pass_info.workgroup_dim.y,
-                );
+                    pass.set_bind_group(
+                        0,
+                        &self.backward_gradient_mat_pass_info.bind_group,
+                        &[dyn_off],
+                    );
 
-                pass.dispatch_workgroups(gx as u32, gy as u32, 1);
+                    let gx = ceil_div(
+                        self.nn_info.layer_dim[layer_i],
+                        self.backward_gradient_mat_pass_info.workgroup_dim.x,
+                    );
+                    let gy = ceil_div(
+                        self.nn_info.layer_dim[layer_i - 1],
+                        self.backward_gradient_mat_pass_info.workgroup_dim.y,
+                    );
+
+                    pass.dispatch_workgroups(gx as u32, gy as u32, 1);
+                }
+            }
+        }
+
+        let backward_commands = encoder.finish();
+        gpu_instance.queue.submit([backward_commands]);
+    }
+
+    pub fn backward_mat_convnn(&self, gpu_instance: &GPUInstance) {
+        let mut encoder =
+            gpu_instance
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("encoder"),
+                });
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("cpass"),
+                timestamp_writes: None,
+            });
+
+            for layer_i in (0..self.nn_info.get_n_layers()).rev() {
+                if layer_i != self.nn_info.get_n_layers() - 1 {
+                    let dyn_off =
+                        layer_i as u32 * self.backward_deriv_mat_pass_info.dir_slot_size as u32;
+
+                    pass.set_pipeline(&self.backward_deriv_mat_pass_info.pipeline);
+
+                    pass.set_bind_group(
+                        0,
+                        &self.backward_deriv_mat_pass_info.bind_group,
+                        &[dyn_off],
+                    );
+
+                    let gx = ceil_div(
+                        self.nn_info.layer_dim[layer_i],
+                        self.backward_deriv_mat_pass_info.workgroup_dim.x,
+                    );
+                    let gy = ceil_div(
+                        self.nn_info.n_batches,
+                        self.backward_deriv_mat_pass_info.workgroup_dim.y,
+                    );
+
+                    pass.dispatch_workgroups(gx as u32, gy as u32, 1);
+                }
+
+                if layer_i != 0 {
+                    let dyn_off = (layer_i - 1) as u32
+                        * self.backward_gradient_mat_pass_info.dir_slot_size as u32;
+
+                    pass.set_pipeline(&self.backward_gradient_mat_pass_info.pipeline);
+
+                    pass.set_bind_group(
+                        0,
+                        &self.backward_gradient_mat_pass_info.bind_group,
+                        &[dyn_off],
+                    );
+
+                    let gx = ceil_div(
+                        self.nn_info.layer_dim[layer_i],
+                        self.backward_gradient_mat_pass_info.workgroup_dim.x,
+                    );
+                    let gy = ceil_div(
+                        self.nn_info.layer_dim[layer_i - 1],
+                        self.backward_gradient_mat_pass_info.workgroup_dim.y,
+                    );
+
+                    pass.dispatch_workgroups(gx as u32, gy as u32, 1);
+                }
             }
         }
 
@@ -903,9 +976,11 @@ impl NNDispatch {
                     label: Some("encoder"),
                 });
 
+        let batch_i_offset = self.nn_info.activity_info.a_length * 1;
+
         encoder.copy_buffer_to_buffer(
             &self.act_buffer,
-            0,
+            batch_i_offset as u64 * 4,
             &self.out_buffer,
             0,
             self.nn_info.activity_info.a_length as u64 * 4,

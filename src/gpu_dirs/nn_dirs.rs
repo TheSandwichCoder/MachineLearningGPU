@@ -228,7 +228,6 @@ impl MatrixDir {
 
         let ping_pong_default = nn_info.activity_info.d_start;
 
-        let n_start: u32;
         if dir_i >= nn_info.n_layers - 1 {
             return MatrixDir::null();
         }

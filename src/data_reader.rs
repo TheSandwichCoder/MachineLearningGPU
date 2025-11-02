@@ -74,8 +74,8 @@ impl DataValue {
     pub fn from_debug() -> DataValue {
         return DataValue {
             label: 0.0,
-            info: vec![1.0, 1.0],
-            data_size: 2,
+            info: vec![1.0; 784],
+            data_size: 784,
         };
     }
 }

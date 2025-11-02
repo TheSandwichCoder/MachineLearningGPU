@@ -272,12 +272,11 @@ impl ConvNNModel {
     }
 
     pub fn debug(&mut self) {
-        self.data_dispatch.data_reader.load_batch_debug();
-
         self.data_dispatch
             .set_data_convnn(&self.gpu_instance, &self.conv_dispatch);
 
         self.conv_dispatch.forward_conv_mat(&self.gpu_instance);
+        // self.conv_dispatch.read_back_act_single(&self.gpu_instance);
 
         self.nn_dispatch
             .transfer_conv_forward(&self.gpu_instance, &self.conv_dispatch);
@@ -286,11 +285,98 @@ impl ConvNNModel {
 
         self.data_dispatch.apply_error(&self.gpu_instance);
 
-        self.nn_dispatch.backward_mat(&self.gpu_instance);
+        self.nn_dispatch.backward_mat_convnn(&self.gpu_instance);
 
         self.conv_dispatch
             .transfer_nn_deriv(&self.gpu_instance, &self.nn_dispatch);
 
-        self.nn_dispatch.read_back_act_single(&self.gpu_instance);
+        self.conv_dispatch.backward_conv_full(&self.gpu_instance);
+
+        self.conv_dispatch.update_momentum(&self.gpu_instance);
+
+        // self.conv_dispatch.read_back_act_single(&self.gpu_instance);
+
+        // self.nn_dispatch.read_back_act_single(&self.gpu_instance);
+    }
+
+    pub fn train(&mut self) {
+        let mut sub_batch_i = 0;
+
+        for epoch_i in 0..self.model_info.n_epochs {
+            self.data_dispatch.data_reader.reset_counters();
+            println!("Epoch {}:", epoch_i);
+            let t0 = Instant::now();
+
+            for load_batch_i in 0..self.data_dispatch.data_reader.n_load_batches {
+                // need to load new batch
+                // self.dispatch.data_reader.load_batch_mnist();
+
+                for sub_batch_i in 0..self.data_dispatch.data_reader.n_sub_batches {
+                    self.data_dispatch
+                        .set_data_convnn(&self.gpu_instance, &self.conv_dispatch);
+
+                    self.conv_dispatch.forward_conv_mat(&self.gpu_instance);
+
+                    self.nn_dispatch
+                        .transfer_conv_forward(&self.gpu_instance, &self.conv_dispatch);
+
+                    self.nn_dispatch.forward_mat(&self.gpu_instance);
+
+                    self.data_dispatch.apply_error(&self.gpu_instance);
+
+                    self.nn_dispatch.backward_mat_convnn(&self.gpu_instance);
+
+                    self.conv_dispatch
+                        .transfer_nn_deriv(&self.gpu_instance, &self.nn_dispatch);
+
+                    self.conv_dispatch.backward_conv_full(&self.gpu_instance);
+
+                    self.nn_dispatch.update_momentum(&self.gpu_instance);
+                    self.conv_dispatch.update_momentum(&self.gpu_instance);
+
+                    self.data_dispatch.data_reader.increment_sub_batch();
+                }
+
+                self.data_dispatch.data_reader.increment_load_batch();
+            }
+
+            self.gpu_instance.device.poll(wgpu::PollType::Wait).unwrap();
+            println!("{:?}", t0.elapsed());
+        }
+    }
+
+    pub fn test(&mut self) {
+        println!("Testing");
+        self.data_dispatch.data_reader.reset_counters();
+        self.data_dispatch.clear_metrics(&self.gpu_instance);
+        let t0 = Instant::now();
+
+        for load_batch_i in 0..self.data_dispatch.data_reader.n_load_batches {
+            // need to load new batch
+            // self.dispatch.data_reader.load_batch_testing();
+            self.data_dispatch.data_reader.load_batch_mnist();
+
+            for sub_batch_i in 0..self.data_dispatch.data_reader.n_sub_batches {
+                self.data_dispatch
+                    .set_data_convnn(&self.gpu_instance, &self.conv_dispatch);
+
+                self.conv_dispatch.forward_conv_mat(&self.gpu_instance);
+
+                self.nn_dispatch
+                    .transfer_conv_forward(&self.gpu_instance, &self.conv_dispatch);
+
+                self.nn_dispatch.forward_mat(&self.gpu_instance);
+
+                self.data_dispatch.update_metrics(&self.gpu_instance);
+
+                self.data_dispatch.data_reader.increment_sub_batch();
+            }
+
+            self.data_dispatch.data_reader.increment_load_batch();
+        }
+        self.gpu_instance.device.poll(wgpu::PollType::Wait).unwrap();
+        println!("{:?}", t0.elapsed());
+
+        self.data_dispatch.read_back_metrics(&self.gpu_instance);
     }
 }
