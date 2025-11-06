@@ -87,6 +87,10 @@ impl ModelConstructor {
     pub fn load_all_data(&mut self, n_data: u32) {
         self.n_data_per_batch = n_data as usize / self.n_batches;
     }
+
+    pub fn set_data_per_batch(&mut self, n_data: u32) {
+        self.n_data_per_batch = n_data as usize;
+    }
 }
 //./datasets/testing.csv
 
@@ -311,7 +315,7 @@ impl ConvNNModel {
 
             for load_batch_i in 0..self.data_dispatch.data_reader.n_load_batches {
                 // need to load new batch
-                // self.dispatch.data_reader.load_batch_mnist();
+                self.data_dispatch.data_reader.load_batch_mnist();
 
                 for sub_batch_i in 0..self.data_dispatch.data_reader.n_sub_batches {
                     self.data_dispatch

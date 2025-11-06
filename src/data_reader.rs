@@ -52,6 +52,25 @@ impl DataValue {
         };
     }
 
+    pub fn from_mnist_letters(srecord: &csv::StringRecord) -> DataValue {
+        let label = srecord[784].parse::<f32>().unwrap() - 1.0;
+
+        let mut info_vec = Vec::new();
+
+        let mut value_i = 0;
+        while value_i < 784 {
+            let value = srecord[value_i].parse::<f32>().unwrap();
+            info_vec.push(value);
+            value_i += 1;
+        }
+
+        return DataValue {
+            label: label,
+            info: info_vec.clone(),
+            data_size: info_vec.len(),
+        };
+    }
+
     pub fn from_testing(srecord: &csv::StringRecord) -> DataValue {
         let label = srecord[0].parse::<f32>().unwrap();
 
@@ -156,6 +175,12 @@ impl DataReader {
         self.n_load_batches = self.dataset_length / self.load_batch_length;
     }
 
+    pub fn initialise_params_mnist_letters(&mut self) {
+        self.dataset_length = 124801;
+        self.data_value_size = 784;
+        self.n_load_batches = self.dataset_length / self.load_batch_length;
+    }
+
     pub fn initialise_params_debug(&mut self) {
         self.dataset_length = 10000;
         self.data_value_size = 2;
@@ -198,6 +223,26 @@ impl DataReader {
             let record = result.unwrap();
 
             self.loaded_data.push(DataValue::from_mnist(&record));
+        }
+    }
+
+    pub fn load_batch_mnist_letters(&mut self) {
+        let mut rdr = csv::ReaderBuilder::new()
+            .has_headers(true)
+            .from_path(self.data_path.clone())
+            .unwrap();
+
+        self.loaded_data.clear();
+
+        for result in rdr
+            .records()
+            .skip(self.load_batch_length * self.load_batch_i)
+            .take(self.load_batch_length)
+        {
+            let record = result.unwrap();
+
+            self.loaded_data
+                .push(DataValue::from_mnist_letters(&record));
         }
     }
 

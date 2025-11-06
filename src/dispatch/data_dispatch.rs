@@ -69,8 +69,8 @@ impl DataDispatch {
     ) -> Self {
         let mut data_reader = DataReader::construct(data_constructor);
 
-        data_reader.initialise_params_mnist();
-        data_reader.load_batch_mnist();
+        data_reader.initialise_params_mnist_letters();
+        data_reader.load_batch_mnist_letters();
 
         let test_metrics = TestMetrics::zero();
 
@@ -384,8 +384,8 @@ impl DataDispatch {
     ) -> Self {
         let mut data_reader = DataReader::construct(data_constructor);
 
-        data_reader.initialise_params_mnist();
-        data_reader.load_batch_mnist();
+        data_reader.initialise_params_mnist_letters();
+        data_reader.load_batch_mnist_letters();
 
         let test_metrics = TestMetrics::zero();
 

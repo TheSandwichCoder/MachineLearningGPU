@@ -32,10 +32,11 @@ fn main() {
     model_construct.add_kernal_layer(4, 2, 16);
     model_construct.add_kernal_layer(2, 1, 8);
 
-    model_construct.set_nn_dim(vec![0, 128, 64, 10]);
+    model_construct.set_nn_dim(vec![0, 128, 64, 26]);
 
-    model_construct.set_datapath(String::from("datasets/mnist_numbers.csv"));
-    model_construct.load_all_data(42000);
+    model_construct.set_datapath(String::from("datasets/mnist_letters.csv"));
+    model_construct.set_data_per_batch(5000);
+    // model_construct.load_all_data(40801);
 
     model_construct.set_lr(0.00001);
     model_construct.set_mr(0.9);
