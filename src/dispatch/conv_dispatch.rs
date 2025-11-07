@@ -2071,7 +2071,7 @@ impl ConvDispatch {
         // 5 - weights
         // 6 - bias
 
-        let read_type = 6;
+        let read_type = 4;
 
         let mut start_idx = 0;
         let mut layer_size = 0;
@@ -2132,8 +2132,8 @@ impl ConvDispatch {
                 self.conv_info.activity_info.swap_buffer_size as u64 * 4 * 2,
             );
 
-            start_idx = self.conv_info.activity_info.batch_swap_buffer_size * 0;
-            layer_size = 7;
+            start_idx = self.conv_info.activity_info.batch_swap_buffer_size * 1;
+            layer_size = 14;
         } else if read_type == 5 {
             encoder.copy_buffer_to_buffer(
                 &self.param_buffer,

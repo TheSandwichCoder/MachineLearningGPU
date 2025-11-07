@@ -206,8 +206,8 @@ impl DataReader {
     }
 
     pub fn load_data_single_type(&mut self, string_record: &StringRecord) -> DataValue {
-        // return DataValue::from_mnist(string_record);
-        return DataValue::from_mnist_letters(string_record);
+        return DataValue::from_mnist(string_record);
+        // return DataValue::from_mnist_letters(string_record);
     }
 
     pub fn load_data(&mut self) {

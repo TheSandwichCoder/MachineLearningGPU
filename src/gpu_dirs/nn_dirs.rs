@@ -51,7 +51,7 @@ pub struct ErrorDir {
 }
 
 impl ErrorDir {
-    pub fn new(nn_info: &NeuralNetworkInfo) -> Self {
+    pub fn new(nn_info: &NeuralNetworkInfo, data_reader: &DataReader) -> Self {
         let last_layer_i = nn_info.n_layers - 1;
 
         let ping_switch = (last_layer_i - 1) % 2;
@@ -64,7 +64,7 @@ impl ErrorDir {
             ping_start: (nn_info.activity_info.d_start
                 + ping_switch * nn_info.activity_info.a_deriv_buffer_size)
                 as u32,
-            data_size: nn_info.layer_dim[0] as u32, // temporary
+            data_size: data_reader.data_value_size as u32,
         };
     }
 }
@@ -80,12 +80,11 @@ pub struct ErrorPC {
 
 impl ErrorPC {
     pub fn new(dr: &DataReader) -> Self {
-        let load_length = dr.sub_batch_i * dr.n_batches;
+        // let load_length = dr.n_sub_batches * dr.n_batches;
         let slot_size = dr.data_value_size + 1;
 
         return ErrorPC {
-            layer_idx: (load_length * slot_size * dr.load_batch_i
-                + dr.n_batches * slot_size * dr.sub_batch_i) as u32,
+            layer_idx: (dr.n_batches * slot_size * dr.sub_batch_i) as u32,
             n_batches: dr.n_batches as u32,
             _pad2: 0,
             _pad3: 0,

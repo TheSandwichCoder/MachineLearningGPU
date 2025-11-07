@@ -113,7 +113,7 @@ impl DataDispatch {
             * gpu_instance.align;
         let error_dir_buffer_size = error_slot as u64 * 1;
 
-        let error_dir = ErrorDir::new(&nn_dispatch.nn_info);
+        let error_dir = ErrorDir::new(&nn_dispatch.nn_info, &data_reader);
 
         let error_dir_buffer =
             gpu_instance
@@ -426,7 +426,7 @@ impl DataDispatch {
             * gpu_instance.align;
         let error_dir_buffer_size = error_slot as u64 * 1;
 
-        let error_dir = ErrorDir::new(&nn_dispatch.nn_info);
+        let error_dir = ErrorDir::new(&nn_dispatch.nn_info, &data_reader);
 
         let error_dir_buffer =
             gpu_instance
@@ -541,6 +541,17 @@ impl DataDispatch {
         // |                                                        |
         // +--------------------------------------------------------+
 
+        let test_dir = ErrorDir::new(&nn_dispatch.nn_info, &data_reader);
+
+        let test_dir_buffer =
+            gpu_instance
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("test_dir_buf"),
+                    contents: bytemuck::bytes_of(&test_dir),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+
         // ---------------------Shader Sources---------------------
         let wgsl_src = include_str!("../shaders/test_model.wgsl");
         let test_shader = gpu_instance
@@ -626,7 +637,7 @@ impl DataDispatch {
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
-                        resource: error_dir_buffer.as_entire_binding(),
+                        resource: test_dir_buffer.as_entire_binding(),
                     },
                 ],
             });

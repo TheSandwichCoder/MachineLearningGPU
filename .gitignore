@@ -6,3 +6,6 @@ saves/saved_nn.txt
 saves/saved_nn.txt
 saves/saved_nn.txt
 *.csv
+*.csv
+*.csv
+datasets/mnist_letters.csv

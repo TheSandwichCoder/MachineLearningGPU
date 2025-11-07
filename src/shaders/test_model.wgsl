@@ -30,9 +30,7 @@ var<push_constant> pc: PC;
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let batch_i = gid.x;
-
     
-
     if (batch_i >= pc.n_batches){
         return;
     }

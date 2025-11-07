@@ -305,31 +305,20 @@ impl ConvNNModel {
     }
 
     pub fn debug(&mut self) {
+        self.data_dispatch.data_reader.reset_counters();
+        self.data_dispatch.load_data(&self.gpu_instance);
+
         self.data_dispatch
             .set_data_convnn(&self.gpu_instance, &self.conv_dispatch);
 
         self.conv_dispatch.forward_conv_mat(&self.gpu_instance);
-        // self.conv_dispatch.read_back_act_single(&self.gpu_instance);
 
         self.nn_dispatch
             .transfer_conv_forward(&self.gpu_instance, &self.conv_dispatch);
 
         self.nn_dispatch.forward_mat(&self.gpu_instance);
 
-        self.data_dispatch.apply_error(&self.gpu_instance);
-
-        self.nn_dispatch.backward_mat_convnn(&self.gpu_instance);
-
-        self.conv_dispatch
-            .transfer_nn_deriv(&self.gpu_instance, &self.nn_dispatch);
-
-        self.conv_dispatch.backward_conv_full(&self.gpu_instance);
-
-        self.conv_dispatch.update_momentum(&self.gpu_instance);
-
-        // self.conv_dispatch.read_back_act_single(&self.gpu_instance);
-
-        // self.nn_dispatch.read_back_act_single(&self.gpu_instance);
+        self.conv_dispatch.read_back_act_single(&self.gpu_instance);
     }
 
     pub fn train(&mut self) {
@@ -400,7 +389,7 @@ impl ConvNNModel {
 
                 self.nn_dispatch.forward_mat(&self.gpu_instance);
 
-                // self.data_dispatch.update_metrics(&self.gpu_instance);
+                self.data_dispatch.update_metrics(&self.gpu_instance);
 
                 self.data_dispatch.data_reader.increment_sub_batch();
             }
