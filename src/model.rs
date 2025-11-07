@@ -19,9 +19,13 @@ pub struct ModelConstructor {
     pub conv_layer_output: Vec<usize>,
 
     pub n_batches: usize,
-    pub n_data_per_batch: usize, // n_batches * n_data_per_batch = total data loaded per batch
+
+    pub data_batches_per_load: usize,
     pub n_epochs: usize,
     pub data_path: String,
+    pub dataset_length: usize,
+    pub data_value_size: usize,
+
     pub lr: f32,
     pub mr: f32,
 }
@@ -38,9 +42,12 @@ impl ModelConstructor {
             conv_layer_output: Vec::new(),
 
             n_batches: 16,
-            n_data_per_batch: 100,
+            data_batches_per_load: 100,
             n_epochs: 1,
             data_path: String::from(""),
+            dataset_length: 0,
+            data_value_size: 0,
+
             lr: 0.1,
             mr: 0.9,
         };
@@ -80,16 +87,35 @@ impl ModelConstructor {
         self.n_epochs = epochs;
     }
 
-    pub fn set_datapath(&mut self, path: String) {
+    pub fn set_data_mnist(&mut self) {
+        self.set_data_info(String::from("datasets/mnist_numbers.csv"), 42001, 1, 784);
+        self.load_all_data();
+    }
+
+    pub fn set_data_mnist_letters(&mut self) {
+        self.set_data_info(
+            String::from("datasets/mnist_letters.csv"),
+            124801,
+            1500,
+            784,
+        );
+    }
+
+    pub fn set_data_info(
+        &mut self,
+        path: String,
+        dataset_length: usize,
+        data_batches_per_load: usize,
+        data_value_size: usize,
+    ) {
         self.data_path = path;
+        self.dataset_length = dataset_length;
+        self.data_batches_per_load = data_batches_per_load;
+        self.data_value_size = data_value_size;
     }
 
-    pub fn load_all_data(&mut self, n_data: u32) {
-        self.n_data_per_batch = n_data as usize / self.n_batches;
-    }
-
-    pub fn set_data_per_batch(&mut self, n_data: u32) {
-        self.n_data_per_batch = n_data as usize;
+    pub fn load_all_data(&mut self) {
+        self.data_batches_per_load = self.dataset_length / self.n_batches;
     }
 }
 //./datasets/testing.csv
@@ -202,7 +228,7 @@ impl BasicNNModel {
         for load_batch_i in 0..self.data_dispatch.data_reader.n_load_batches {
             // need to load new batch
             // self.dispatch.data_reader.load_batch_testing();
-            self.data_dispatch.data_reader.load_batch_mnist();
+            self.data_dispatch.load_data(&self.gpu_instance);
 
             for sub_batch_i in 0..self.data_dispatch.data_reader.n_sub_batches {
                 self.data_dispatch
@@ -275,6 +301,7 @@ impl ConvNNModel {
     pub fn show_all_specs(&self) {
         self.nn_info.show_all_specs();
         self.conv_info.show_all_specs();
+        self.data_dispatch.data_reader.show_all_specs();
     }
 
     pub fn debug(&mut self) {
@@ -315,7 +342,7 @@ impl ConvNNModel {
 
             for load_batch_i in 0..self.data_dispatch.data_reader.n_load_batches {
                 // need to load new batch
-                self.data_dispatch.data_reader.load_batch_mnist();
+                self.data_dispatch.load_data(&self.gpu_instance);
 
                 for sub_batch_i in 0..self.data_dispatch.data_reader.n_sub_batches {
                     self.data_dispatch
@@ -349,6 +376,7 @@ impl ConvNNModel {
             self.gpu_instance.device.poll(wgpu::PollType::Wait).unwrap();
             println!("{:?}", t0.elapsed());
         }
+        self.data_dispatch.data_reader.reset_counters();
     }
 
     pub fn test(&mut self) {
@@ -359,8 +387,7 @@ impl ConvNNModel {
 
         for load_batch_i in 0..self.data_dispatch.data_reader.n_load_batches {
             // need to load new batch
-            // self.dispatch.data_reader.load_batch_testing();
-            self.data_dispatch.data_reader.load_batch_mnist();
+            self.data_dispatch.load_data(&self.gpu_instance);
 
             for sub_batch_i in 0..self.data_dispatch.data_reader.n_sub_batches {
                 self.data_dispatch
@@ -373,7 +400,7 @@ impl ConvNNModel {
 
                 self.nn_dispatch.forward_mat(&self.gpu_instance);
 
-                self.data_dispatch.update_metrics(&self.gpu_instance);
+                // self.data_dispatch.update_metrics(&self.gpu_instance);
 
                 self.data_dispatch.data_reader.increment_sub_batch();
             }

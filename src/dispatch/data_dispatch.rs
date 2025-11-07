@@ -68,9 +68,7 @@ impl DataDispatch {
         nn_dispatch: &NNDispatch,
     ) -> Self {
         let mut data_reader = DataReader::construct(data_constructor);
-
-        data_reader.initialise_params_mnist_letters();
-        data_reader.load_batch_mnist_letters();
+        data_reader.load_data();
 
         let test_metrics = TestMetrics::zero();
 
@@ -80,7 +78,7 @@ impl DataDispatch {
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("data buffer"),
-                    contents: bytemuck::cast_slice(&data_reader.get_buffer()),
+                    contents: bytemuck::cast_slice(&data_reader.get_load_batch_buffer()),
                     usage: wgpu::BufferUsages::STORAGE
                         | wgpu::BufferUsages::COPY_DST
                         | wgpu::BufferUsages::COPY_SRC,
@@ -383,9 +381,7 @@ impl DataDispatch {
         nn_dispatch: &NNDispatch,
     ) -> Self {
         let mut data_reader = DataReader::construct(data_constructor);
-
-        data_reader.initialise_params_mnist_letters();
-        data_reader.load_batch_mnist_letters();
+        data_reader.load_data();
 
         let test_metrics = TestMetrics::zero();
 
@@ -395,7 +391,7 @@ impl DataDispatch {
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("data buffer"),
-                    contents: bytemuck::cast_slice(&data_reader.get_buffer()),
+                    contents: bytemuck::cast_slice(&data_reader.get_load_batch_buffer()),
                     usage: wgpu::BufferUsages::STORAGE
                         | wgpu::BufferUsages::COPY_DST
                         | wgpu::BufferUsages::COPY_SRC,
@@ -702,7 +698,7 @@ impl DataDispatch {
         let data_slot = (self.data_reader.data_value_size + 1);
         // let curr_batch_start = self.data_reader.load_batch_i * self.data_reader.load_batch_length * data_slot  + self.data_reader.sub_batch_i * self.data_reader.sub_batch_length * data_slot;
         let curr_batch_start =
-            self.data_reader.sub_batch_i * self.data_reader.sub_batch_length * data_slot;
+            self.data_reader.sub_batch_i * self.data_reader.n_batches * data_slot;
 
         let nn_info = &nn_dispatch.nn_info;
 
@@ -744,7 +740,7 @@ impl DataDispatch {
         let data_slot = (self.data_reader.data_value_size + 1);
         // let curr_batch_start = self.data_reader.load_batch_i * self.data_reader.load_batch_length * data_slot  + self.data_reader.sub_batch_i * self.data_reader.sub_batch_length * data_slot;
         let curr_batch_start =
-            self.data_reader.sub_batch_i * self.data_reader.sub_batch_length * data_slot;
+            self.data_reader.sub_batch_i * self.data_reader.n_batches * data_slot;
 
         let conv_info = &conv_dispatch.conv_info;
 
@@ -788,7 +784,7 @@ impl DataDispatch {
                 timestamp_writes: None,
             });
 
-            let params = ErrorPC::new(&self.data_reader, self.data_reader.n_batches);
+            let params = ErrorPC::new(&self.data_reader);
 
             // println!("{}", params.batch_start_idx);
 
@@ -824,13 +820,13 @@ impl DataDispatch {
                 timestamp_writes: None,
             });
 
-            let params = ErrorPC::new(&self.data_reader, self.data_reader.n_batches);
+            let push_constants = ErrorPC::new(&self.data_reader);
 
             pass.set_pipeline(&self.test_pass_info.pipeline);
 
             pass.set_bind_group(0, &self.test_pass_info.bind_group, &[]);
 
-            pass.set_push_constants(0, bytemuck::bytes_of(&params));
+            pass.set_push_constants(0, bytemuck::bytes_of(&push_constants));
 
             let gx = ceil_div(
                 self.data_reader.n_batches,
@@ -907,5 +903,13 @@ impl DataDispatch {
         println!("{:?}", out);
         drop(data);
         self.out_buffer.unmap();
+    }
+
+    pub fn load_data(&self, gpu_instance: &GPUInstance) {
+        gpu_instance.queue.write_buffer(
+            &self.data_buffer,
+            0,
+            bytemuck::cast_slice(&self.data_reader.get_load_batch_buffer()),
+        );
     }
 }

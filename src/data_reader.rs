@@ -1,18 +1,30 @@
 use std::fs::File;
 
 use crate::model::ModelConstructor;
+use csv::StringRecord;
 
+// data_batches_per_load - n sub batches
 pub struct DataConstructor {
     pub data_path: String,
-    pub data_per_batch: usize,
+    pub dataset_length: usize,
+    pub data_batches_per_load: usize,
+    pub data_value_size: usize,
     pub n_batches: usize,
 }
 
 impl DataConstructor {
-    pub fn new(data_path: String, data_per_batch: usize, n_batches: usize) -> Self {
+    pub fn new(
+        data_path: String,
+        dataset_length: usize,
+        data_batches_per_load: usize,
+        data_value_size: usize,
+        n_batches: usize,
+    ) -> Self {
         return DataConstructor {
             data_path: data_path,
-            data_per_batch: data_per_batch,
+            dataset_length: dataset_length,
+            data_batches_per_load: data_batches_per_load,
+            data_value_size: data_value_size,
             n_batches: n_batches,
         };
     }
@@ -20,13 +32,15 @@ impl DataConstructor {
     pub fn from_model_constructor(model_constructor: &ModelConstructor) -> Self {
         return DataConstructor {
             data_path: model_constructor.data_path.clone(),
-            data_per_batch: model_constructor.n_data_per_batch,
+            dataset_length: model_constructor.dataset_length,
+            data_batches_per_load: model_constructor.data_batches_per_load,
+            data_value_size: model_constructor.data_value_size,
             n_batches: model_constructor.n_batches,
         };
     }
 }
 
-struct DataValue {
+pub struct DataValue {
     label: f32,
     info: Vec<f32>,
     data_size: usize,
@@ -66,8 +80,8 @@ impl DataValue {
 
         return DataValue {
             label: label,
-            info: info_vec.clone(),
-            data_size: info_vec.len(),
+            info: info_vec,
+            data_size: 784,
         };
     }
 
@@ -99,6 +113,10 @@ impl DataValue {
     }
 }
 
+// load batch - number of times the model has to reload new data
+// sub batch - number of forward steps the model can use the existing data
+// n batches - number of data that is loaded in 1 forward step (n batches of the model)
+
 pub struct DataReader {
     pub data_path: String,
 
@@ -108,84 +126,64 @@ pub struct DataReader {
     pub load_batch_i: usize, // current load batch
     pub sub_batch_i: usize,
 
-    pub n_load_batches: usize, // number of load batches
-    pub n_sub_batches: usize,
-
-    pub load_batch_length: usize, // number of data values in a load batch
-    pub sub_batch_length: usize,  // number of data values in a sub batch
+    pub n_load_batches: usize, // number of sub batches in a load batch
+    pub n_sub_batches: usize,  // number of data batches in a sub batch
+    pub n_batches: usize,      // literally number of batches run in the model
 
     pub data_value_size: usize,
-    pub n_batches: usize, // literally nuber of batches run in the model
 }
 
 impl DataReader {
     pub fn construct(data_constructor: &DataConstructor) -> Self {
         return DataReader::new(
             data_constructor.data_path.clone(),
-            (data_constructor.n_batches * data_constructor.data_per_batch) as usize,
+            data_constructor.dataset_length,
+            data_constructor.data_batches_per_load,
+            data_constructor.data_value_size,
             data_constructor.n_batches,
         );
     }
 
-    pub fn new(data_path: String, load_batch_length: usize, sub_batch_length: usize) -> Self {
+    pub fn new(
+        data_path: String,
+        dataset_length: usize,
+        n_sub_batches: usize,
+        data_value_size: usize,
+        n_batches: usize,
+    ) -> Self {
         return DataReader {
             data_path,
 
             loaded_data: Vec::new(),
-            dataset_length: 0,
+            dataset_length: dataset_length,
 
             load_batch_i: 0,
             sub_batch_i: 0,
 
-            n_load_batches: 0,
-            n_sub_batches: load_batch_length / sub_batch_length,
+            n_load_batches: dataset_length / (n_sub_batches * n_batches),
+            n_sub_batches: n_sub_batches,
+            n_batches: n_batches,
 
-            load_batch_length: load_batch_length,
-            sub_batch_length: sub_batch_length,
-
-            data_value_size: 0,
-            n_batches: sub_batch_length,
+            data_value_size: data_value_size,
         };
     }
 
     // called dump buffer because we wipe values
-    pub fn get_buffer(&self) -> Vec<f32> {
+    pub fn get_load_batch_buffer(&self) -> Vec<f32> {
         let mut buffer_vec: Vec<f32> = Vec::new();
 
-        for data in &self.loaded_data {
+        let start_idx = self.load_batch_i * self.n_sub_batches * self.n_batches;
+        let stop_idx = (self.load_batch_i + 1) * self.n_sub_batches * self.n_batches;
+
+        for data_i in start_idx..stop_idx {
+            let data = &self.loaded_data[data_i];
+
             buffer_vec.push(data.label);
             buffer_vec.extend(data.info.iter());
         }
 
+        println!("{} {}", start_idx, stop_idx);
         return buffer_vec;
-    }
-
-    pub fn initialise_params_testing(&mut self) {
-        self.dataset_length = 1590;
-        self.data_value_size = 2;
-
-        self.n_load_batches = self.dataset_length / self.load_batch_length;
-    }
-
-    pub fn initialise_params_mnist(&mut self) {
-        self.dataset_length = 42002;
-
-        self.data_value_size = 784;
-
-        self.n_load_batches = self.dataset_length / self.load_batch_length;
-    }
-
-    pub fn initialise_params_mnist_letters(&mut self) {
-        self.dataset_length = 124801;
-        self.data_value_size = 784;
-        self.n_load_batches = self.dataset_length / self.load_batch_length;
-    }
-
-    pub fn initialise_params_debug(&mut self) {
-        self.dataset_length = 10000;
-        self.data_value_size = 2;
-
-        self.n_load_batches = self.dataset_length / self.load_batch_length;
     }
 
     pub fn reset_counters(&mut self) {
@@ -207,26 +205,12 @@ impl DataReader {
         }
     }
 
-    pub fn load_batch_mnist(&mut self) {
-        let mut rdr = csv::ReaderBuilder::new()
-            .has_headers(true)
-            .from_path(self.data_path.clone())
-            .unwrap();
-
-        self.loaded_data.clear();
-
-        for result in rdr
-            .records()
-            .skip(self.load_batch_length * self.load_batch_i)
-            .take(self.load_batch_length)
-        {
-            let record = result.unwrap();
-
-            self.loaded_data.push(DataValue::from_mnist(&record));
-        }
+    pub fn load_data_single_type(&mut self, string_record: &StringRecord) -> DataValue {
+        // return DataValue::from_mnist(string_record);
+        return DataValue::from_mnist_letters(string_record);
     }
 
-    pub fn load_batch_mnist_letters(&mut self) {
+    pub fn load_data(&mut self) {
         let mut rdr = csv::ReaderBuilder::new()
             .has_headers(true)
             .from_path(self.data_path.clone())
@@ -234,15 +218,12 @@ impl DataReader {
 
         self.loaded_data.clear();
 
-        for result in rdr
-            .records()
-            .skip(self.load_batch_length * self.load_batch_i)
-            .take(self.load_batch_length)
-        {
+        for result in rdr.records() {
             let record = result.unwrap();
 
-            self.loaded_data
-                .push(DataValue::from_mnist_letters(&record));
+            let data_value = self.load_data_single_type(&record);
+
+            self.loaded_data.push(data_value);
         }
     }
 
@@ -265,5 +246,27 @@ impl DataReader {
 
             self.loaded_data.push(DataValue::from_testing(&record));
         }
+    }
+
+    pub fn show_all_specs(&self) {
+        println!("Data Reader:");
+
+        println!("Data Set:");
+        println!("size: {}", self.dataset_length);
+        println!(
+            "reloads per epoch (n load batches): {}",
+            self.n_load_batches
+        );
+        println!("n sub batches: {}", self.n_sub_batches);
+        println!("n batches: {}", self.n_batches);
+
+        println!("Efficiency");
+        let n_data_points_used = self.n_load_batches * self.n_sub_batches * self.n_batches;
+        println!(
+            "{} / {} ({}%)",
+            n_data_points_used,
+            self.dataset_length,
+            n_data_points_used as f32 / self.dataset_length as f32
+        );
     }
 }

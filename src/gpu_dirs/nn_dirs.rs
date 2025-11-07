@@ -79,12 +79,14 @@ pub struct ErrorPC {
 }
 
 impl ErrorPC {
-    pub fn new(dr: &DataReader, n_batches: usize) -> Self {
+    pub fn new(dr: &DataReader) -> Self {
+        let load_length = dr.sub_batch_i * dr.n_batches;
+        let slot_size = dr.data_value_size + 1;
+
         return ErrorPC {
-            layer_idx: (dr.load_batch_length * (dr.data_value_size + 1) * dr.load_batch_i
-                + dr.sub_batch_length * (dr.data_value_size + 1) * dr.sub_batch_i)
-                as u32,
-            n_batches: n_batches as u32,
+            layer_idx: (load_length * slot_size * dr.load_batch_i
+                + dr.n_batches * slot_size * dr.sub_batch_i) as u32,
+            n_batches: dr.n_batches as u32,
             _pad2: 0,
             _pad3: 0,
         };
