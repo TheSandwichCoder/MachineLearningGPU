@@ -17,8 +17,17 @@ use crate::model::*;
 use crate::conv_datatypes::*;
 
 // TODO
-// fix the momentum calc for nn and conv
-// integrate both of them together
+// Things that could go wrong
+// might accumulate multiple times in the buffers?
+// data transfer between conv
+// forward and backward process?
+// might have something to do with gradients? checked it and looked repeated
+
+// Things that I am pretty sure work
+// conv forward
+// conv backward (with deriv)
+// nn forward and backward
+// storage buffer (single pass)
 
 fn main() {
     // pollster::block_on(run()););
@@ -32,7 +41,7 @@ fn main() {
 
     model_construct.set_nn_dim(vec![0, 128, 64, 10]);
 
-    model_construct.set_lr(0.00001);
+    model_construct.set_lr(0.0000001);
     model_construct.set_mr(0.9);
 
     model_construct.set_batch(16);
@@ -45,9 +54,9 @@ fn main() {
 
     convnn_model.show_all_specs();
 
-    convnn_model.debug();
+    // convnn_model.debug();
 
-    // convnn_model.train();
-    // convnn_model.test();
-    // convnn_model.save();
+    convnn_model.train();
+    convnn_model.test();
+    convnn_model.save();
 }

@@ -2070,8 +2070,9 @@ impl ConvDispatch {
         // 4 - forward outputs
         // 5 - weights
         // 6 - bias
+        // 7 - storage outputs
 
-        let read_type = 4;
+        let read_type = 7;
 
         let mut start_idx = 0;
         let mut layer_size = 0;
@@ -2132,7 +2133,7 @@ impl ConvDispatch {
                 self.conv_info.activity_info.swap_buffer_size as u64 * 4 * 2,
             );
 
-            start_idx = self.conv_info.activity_info.batch_swap_buffer_size * 1;
+            start_idx = self.conv_info.activity_info.batch_swap_buffer_size * 0;
             layer_size = 14;
         } else if read_type == 5 {
             encoder.copy_buffer_to_buffer(
@@ -2156,6 +2157,18 @@ impl ConvDispatch {
 
             start_idx = self.conv_info.param_info.b_offset + self.conv_info.param_info.b_strides[0];
             layer_size = 28;
+        } else if read_type == 7 {
+            encoder.copy_buffer_to_buffer(
+                &self.o_storage_buffer,
+                0,
+                &self.out_buffer,
+                0,
+                self.conv_info.activity_info.storage_buffer_size as u64 * 4,
+            );
+
+            start_idx = self.conv_info.activity_info.strides[2]
+                + self.conv_info.activity_info.dim[2].tens_length * 1;
+            layer_size = 14;
         }
 
         gpu_instance.queue.submit(Some(encoder.finish()));

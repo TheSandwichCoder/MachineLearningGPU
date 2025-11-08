@@ -318,6 +318,7 @@ impl ConvNNModel {
 
         self.nn_dispatch.forward_mat(&self.gpu_instance);
 
+        self.nn_dispatch.read_back_act_single(&self.gpu_instance);
         self.conv_dispatch.read_back_act_single(&self.gpu_instance);
     }
 

@@ -591,6 +591,7 @@ impl ConvParamInfo {
     // weights for the model
     pub fn create_buffer(&self) -> Vec<f32> {
         // let mut empty_vec = vec![1.0; self.size];
+        // return empty_vec;
 
         // for i in 0..self.k_strides[1] {
         //     empty_vec[i] = (i as f32 - 32.0) / 64.0;

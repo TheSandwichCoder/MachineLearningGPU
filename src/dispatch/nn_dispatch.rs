@@ -840,14 +840,16 @@ impl NNDispatch {
                 });
 
         let conv_info = &conv_dispatch.conv_info;
+
+        let conv_skip = conv_info.activity_info.batch_swap_buffer_size;
         let data_length = conv_info.activity_info.dim[conv_info.n_layers - 1].tens_length;
 
         for batch_i in 0..self.nn_info.n_batches {
             let write_i_swap = batch_i * self.nn_info.activity_info.a_length;
             let write_i_storage =
-                batch_i * self.nn_info.activity_info.a_length + self.nn_info.activity_info.s_start;
+                self.nn_info.activity_info.s_start + batch_i * self.nn_info.activity_info.a_length;
 
-            let read_i = batch_i * data_length;
+            let read_i = batch_i * conv_skip;
 
             encoder.copy_buffer_to_buffer(
                 &conv_dispatch.get_act_buffer_ref(),
@@ -976,6 +978,14 @@ impl NNDispatch {
                     label: Some("encoder"),
                 });
 
+        // 0 - storage buffer
+        let read_back_type = 0;
+
+        let mut start_idx = 0;
+        let mut read_back_length = 0;
+
+        let square_shape = 14;
+
         let batch_i_offset = self.nn_info.activity_info.a_length * 1;
 
         encoder.copy_buffer_to_buffer(
@@ -985,6 +995,11 @@ impl NNDispatch {
             0,
             self.nn_info.activity_info.a_length as u64 * 4,
         );
+
+        if read_back_type == 0 {
+            start_idx = self.nn_info.activity_info.s_start;
+            read_back_length = 200;
+        }
 
         gpu_instance.queue.submit(Some(encoder.finish()));
 
@@ -996,25 +1011,47 @@ impl NNDispatch {
         let data = slice.get_mapped_range();
         let out: &[f32] = bytemuck::cast_slice(&data);
 
-        println!(
-            "v: {:?}",
-            &out[self.nn_info.activity_info.s_start as usize
-                ..self.nn_info.activity_info.d_start as usize]
-        );
-        println!(
-            "p1: {:?}",
-            &out[self.nn_info.activity_info.d_start as usize
-                ..(self.nn_info.activity_info.d_start
-                    + self.nn_info.activity_info.a_deriv_buffer_size) as usize]
-        );
-        println!(
-            "p2: {:?}",
-            &out[(self.nn_info.activity_info.d_start
-                + self.nn_info.activity_info.a_deriv_buffer_size) as usize
-                ..(self.nn_info.activity_info.d_start
-                    + self.nn_info.activity_info.a_deriv_buffer_size * 2)
-                    as usize]
-        );
+        if square_shape == 0 {
+            println!("{:?}", &out[start_idx..(start_idx + read_back_length)]);
+        } else {
+            let check_n_layers = 60;
+
+            let mut prev_idx = start_idx;
+            let mut curr_idx = prev_idx + square_shape;
+
+            while curr_idx <= start_idx + square_shape * check_n_layers {
+                if ((prev_idx - start_idx) / square_shape) % square_shape == 0 {
+                    println!("{}", (prev_idx - start_idx) / (square_shape * square_shape));
+                }
+                println!(
+                    "{} activity buffer: {:?}",
+                    (((prev_idx - start_idx) / square_shape) % square_shape),
+                    &out[prev_idx..curr_idx]
+                );
+                prev_idx += square_shape;
+                curr_idx += square_shape;
+            }
+        }
+
+        // println!(
+        //     "v: {:?}",
+        //     &out[self.nn_info.activity_info.s_start as usize
+        //         ..self.nn_info.activity_info.d_start as usize]
+        // );
+        // println!(
+        //     "p1: {:?}",
+        //     &out[self.nn_info.activity_info.d_start as usize
+        //         ..(self.nn_info.activity_info.d_start
+        //             + self.nn_info.activity_info.a_deriv_buffer_size) as usize]
+        // );
+        // println!(
+        //     "p2: {:?}",
+        //     &out[(self.nn_info.activity_info.d_start
+        //         + self.nn_info.activity_info.a_deriv_buffer_size) as usize
+        //         ..(self.nn_info.activity_info.d_start
+        //             + self.nn_info.activity_info.a_deriv_buffer_size * 2)
+        //             as usize]
+        // );
 
         drop(data);
         self.out_buffer.unmap();
