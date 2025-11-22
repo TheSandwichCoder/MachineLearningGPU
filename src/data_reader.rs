@@ -1,5 +1,6 @@
 use std::fs::File;
 
+use crate::functions::*;
 use crate::model::ModelConstructor;
 use csv::StringRecord;
 
@@ -206,8 +207,8 @@ impl DataReader {
     }
 
     pub fn load_data_single_type(&mut self, string_record: &StringRecord) -> DataValue {
-        return DataValue::from_mnist(string_record);
-        // return DataValue::from_mnist_letters(string_record);
+        // return DataValue::from_mnist(string_record);
+        return DataValue::from_mnist_letters(string_record);
     }
 
     pub fn load_data(&mut self) {
@@ -218,12 +219,14 @@ impl DataReader {
 
         self.loaded_data.clear();
 
+        let mut counter: usize = 0;
         for result in rdr.records() {
             let record = result.unwrap();
 
             let data_value = self.load_data_single_type(&record);
 
             self.loaded_data.push(data_value);
+            counter += 1;
         }
     }
 
@@ -249,14 +252,20 @@ impl DataReader {
     }
 
     pub fn show_all_specs(&self) {
-        println!("Data Reader:");
+        println!("DATA READER INFO");
 
-        println!("Data Set:");
-        println!("size: {}", self.dataset_length);
+        println!("\nCAPACITY INFO");
+        println!("volume: {}", self.dataset_length);
+
+        let dataset_mem = self.dataset_length * self.data_value_size * 4;
+
+        println!("size: {} floats ({}MB)", dataset_mem, get_mb(dataset_mem));
         println!(
             "reloads per epoch (n load batches): {}",
             self.n_load_batches
         );
+
+        println!("\nUSAGE INFO");
         println!("n sub batches: {}", self.n_sub_batches);
         println!("n batches: {}", self.n_batches);
 
@@ -268,5 +277,6 @@ impl DataReader {
             self.dataset_length,
             n_data_points_used as f32 / self.dataset_length as f32
         );
+        println!("\n");
     }
 }

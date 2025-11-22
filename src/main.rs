@@ -17,6 +17,8 @@ use crate::model::*;
 use crate::conv_datatypes::*;
 
 // TODO
+// check the parser (think it is wrong)
+
 // Things that could go wrong
 // might accumulate multiple times in the buffers?
 // data transfer between conv
@@ -33,22 +35,24 @@ fn main() {
     // pollster::block_on(run()););
     let mut model_construct = ModelConstructor::default();
 
-    model_construct.set_conv_n_layers(3);
+    model_construct.set_conv_n_layers(4);
     model_construct.set_conv_input_layer_dim(vec![28, 28, 1]);
 
-    model_construct.add_kernal_layer(4, 2, 16);
-    model_construct.add_kernal_layer(2, 1, 8);
+    model_construct.add_kernal_layer(3, 2, 16);
+    model_construct.add_kernal_layer(3, 1, 32);
+    model_construct.add_kernal_layer(3, 2, 32);
 
-    model_construct.set_nn_dim(vec![0, 128, 64, 10]);
+    model_construct.set_nn_dim(vec![0, 512, 256, 26]);
 
-    model_construct.set_lr(0.0000001);
+    model_construct.set_lr(0.001);
     model_construct.set_mr(0.9);
+    model_construct.set_vr(0.999);
 
     model_construct.set_batch(16);
     model_construct.set_epochs(10);
 
-    model_construct.set_data_mnist();
-    // model_construct.set_data_mnist_letters();
+    // model_construct.set_data_mnist();
+    model_construct.set_data_mnist_letters();
 
     let mut convnn_model = ConvNNModel::construct(model_construct);
 

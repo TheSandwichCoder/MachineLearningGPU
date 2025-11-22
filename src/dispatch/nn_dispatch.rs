@@ -51,8 +51,9 @@ pub struct NNDispatch {
     param_buffer: wgpu::Buffer,    // holds the params for the model
     gradient_buffer: wgpu::Buffer, // holds the param gradients
     momentum_buffer: wgpu::Buffer, // holds the param momentum
-    act_buffer: wgpu::Buffer,      // holds intermediate layer outputs and gradients
-    out_buffer: wgpu::Buffer,      // retrieves parameters and debug stuff
+    variance_buffer: wgpu::Buffer,
+    act_buffer: wgpu::Buffer, // holds intermediate layer outputs and gradients
+    out_buffer: wgpu::Buffer, // retrieves parameters and debug stuff
 
     forward_mat_pass_info: NNPassInfo,
     backward_deriv_mat_pass_info: NNPassInfo,
@@ -70,12 +71,7 @@ impl NNDispatch {
 
     pub fn new(gpu_instance: &GPUInstance, nn_constructor: &NNConstructor) -> Self {
         // ---------------------Neural Network Info---------------------
-        let nn_info = NeuralNetworkInfo::new(
-            &nn_constructor.nn_dim,
-            nn_constructor.n_batches as usize,
-            nn_constructor.lr,
-            nn_constructor.mr,
-        );
+        let nn_info = NeuralNetworkInfo::construct(nn_constructor);
 
         let (p_dir, a_dir) = nn_info.create_dirs();
 
@@ -106,6 +102,17 @@ impl NNDispatch {
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("momentum buffer"),
+                    contents: bytemuck::cast_slice(&p_dir.create_buffer_empty()),
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_DST
+                        | wgpu::BufferUsages::COPY_SRC,
+                });
+
+        let variance_buffer =
+            gpu_instance
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("variance buffer"),
                     contents: bytemuck::cast_slice(&p_dir.create_buffer_empty()),
                     usage: wgpu::BufferUsages::STORAGE
                         | wgpu::BufferUsages::COPY_DST
@@ -520,7 +527,7 @@ impl NNDispatch {
                             binding: 2,
                             visibility: wgpu::ShaderStages::COMPUTE,
                             ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
                                 has_dynamic_offset: false,
                                 min_binding_size: None,
                             },
@@ -528,6 +535,16 @@ impl NNDispatch {
                         },
                         wgpu::BindGroupLayoutEntry {
                             binding: 3,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 4,
                             visibility: wgpu::ShaderStages::COMPUTE,
                             ty: wgpu::BindingType::Buffer {
                                 ty: wgpu::BufferBindingType::Uniform,
@@ -560,10 +577,14 @@ impl NNDispatch {
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
-                            resource: gradient_buffer.as_entire_binding(),
+                            resource: variance_buffer.as_entire_binding(),
                         },
                         wgpu::BindGroupEntry {
                             binding: 3,
+                            resource: gradient_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
                             resource: momentum_dir_binding,
                         },
                     ],
@@ -589,7 +610,10 @@ impl NNDispatch {
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("momentum_pipeline_layout"),
                     bind_group_layouts: &[&momentum_bind_layout],
-                    push_constant_ranges: &[],
+                    push_constant_ranges: &[wgpu::PushConstantRange {
+                        stages: wgpu::ShaderStages::COMPUTE,
+                        range: 0..std::mem::size_of::<ErrorPC>() as u32, // bytes
+                    }],
                 });
 
         let momentum_pipeline =
@@ -645,6 +669,7 @@ impl NNDispatch {
             param_buffer,
             gradient_buffer,
             momentum_buffer,
+            variance_buffer,
             act_buffer,
             out_buffer,
 
@@ -871,7 +896,7 @@ impl NNDispatch {
         gpu_instance.queue.submit([encoder.finish()]);
     }
 
-    pub fn update_momentum(&self, gpu_instance: &GPUInstance) {
+    pub fn update_momentum(&self, gpu_instance: &GPUInstance, t_i: u32) {
         let mut encoder =
             gpu_instance
                 .device
@@ -895,6 +920,10 @@ impl NNDispatch {
                     self.nn_info.p_length,
                     self.momentum_pass_info.workgroup_dim.x,
                 );
+
+                let params = ApplyPC::new(t_i, self.nn_info.mr, self.nn_info.vr);
+
+                pass.set_push_constants(0, bytemuck::bytes_of(&params));
 
                 pass.dispatch_workgroups(gx as u32, 1, 1);
             }

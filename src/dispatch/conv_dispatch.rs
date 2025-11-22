@@ -3,6 +3,7 @@ use crate::datatypes::{conv_datatypes::*, workgroup::*};
 use crate::dispatch::conv_dispatch;
 use crate::dispatch::nn_dispatch::NNDispatch;
 use crate::functions::*;
+use crate::gpu_dirs::nn_dirs::ApplyPC;
 use crate::gpu_dirs::{conv_dirs::*, nn_dirs::FlatApplyDir};
 use bytemuck::{Pod, Zeroable};
 use std::num::NonZeroU64;
@@ -54,6 +55,7 @@ pub struct ConvDispatch {
     param_buffer: wgpu::Buffer,            // holds the params for the model
     gradient_buffer: wgpu::Buffer,         // holds the param gradients
     momentum_buffer: wgpu::Buffer,         // holds the param momentum
+    variance_buffer: wgpu::Buffer,         // holds the param variance
     o_storage_buffer: wgpu::Buffer,        // holds intermediate layer outputs and gradients
     pool_idx_storage_buffer: wgpu::Buffer, // holds the idx of val that was pooled
     conv_output_swap_buffer: wgpu::Buffer,
@@ -159,6 +161,17 @@ impl ConvDispatch {
                 });
 
         let momentum_buffer =
+            gpu_instance
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("cmomentum buffer"),
+                    contents: bytemuck::cast_slice(&conv_info.param_info.create_buffer_empty(1)),
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_DST
+                        | wgpu::BufferUsages::COPY_SRC,
+                });
+
+        let variance_buffer =
             gpu_instance
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1405,7 +1418,7 @@ impl ConvDispatch {
                             binding: 2,
                             visibility: wgpu::ShaderStages::COMPUTE,
                             ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
                                 has_dynamic_offset: false,
                                 min_binding_size: None,
                             },
@@ -1413,6 +1426,16 @@ impl ConvDispatch {
                         },
                         wgpu::BindGroupLayoutEntry {
                             binding: 3,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 4,
                             visibility: wgpu::ShaderStages::COMPUTE,
                             ty: wgpu::BindingType::Buffer {
                                 ty: wgpu::BufferBindingType::Uniform,
@@ -1445,10 +1468,14 @@ impl ConvDispatch {
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
-                            resource: gradient_buffer.as_entire_binding(),
+                            resource: variance_buffer.as_entire_binding(),
                         },
                         wgpu::BindGroupEntry {
                             binding: 3,
+                            resource: gradient_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
                             resource: momentum_dir_binding,
                         },
                     ],
@@ -1467,14 +1494,16 @@ impl ConvDispatch {
         }
 
         // ---------------------Pipeline Layout---------------------
-
         let momentum_pipeline_layout =
             gpu_instance
                 .device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("momentum_pipeline_layout"),
                     bind_group_layouts: &[&momentum_bind_layout],
-                    push_constant_ranges: &[],
+                    push_constant_ranges: &[wgpu::PushConstantRange {
+                        stages: wgpu::ShaderStages::COMPUTE,
+                        range: 0..std::mem::size_of::<ApplyPC>() as u32, // bytes
+                    }],
                 });
 
         let momentum_pipeline =
@@ -1579,6 +1608,7 @@ impl ConvDispatch {
             conv_output_swap_buffer,
             conv_deriv_swap_buffer,
             accumulate_buffer,
+            variance_buffer,
             out_buffer,
 
             forward_mat_pass_info,
@@ -1598,7 +1628,7 @@ impl ConvDispatch {
         };
     }
 
-    pub fn update_momentum(&self, gpu_instance: &GPUInstance) {
+    pub fn update_momentum(&self, gpu_instance: &GPUInstance, t_i: u32) {
         let mut encoder =
             gpu_instance
                 .device
@@ -1612,12 +1642,16 @@ impl ConvDispatch {
                 timestamp_writes: None,
             });
 
+            let params = ApplyPC::new(t_i, self.conv_info.mr, self.conv_info.vr);
+
             pass.set_pipeline(&self.momentum_pass_info.pipeline);
 
             let batch_i = 0;
 
             let dyn_off = batch_i as u32 * self.momentum_pass_info.dir_slot_size as u32;
             pass.set_bind_group(0, &self.momentum_pass_info.bind_group, &[dyn_off]);
+
+            pass.set_push_constants(0, bytemuck::bytes_of(&params));
 
             let gx = ceil_div(
                 self.conv_info.param_info.size,

@@ -13,6 +13,7 @@ pub struct FlatApplyDir {
     n_params: u32,
     lr: f32,
     mr: f32,
+    vr: f32,
 }
 
 impl FlatApplyDir {
@@ -25,6 +26,7 @@ impl FlatApplyDir {
             n_params: nn_info.p_length as u32,
             lr: nn_info.lr,
             mr: nn_info.mr,
+            vr: nn_info.vr,
         };
     }
     pub fn new_conv(conv_info: &ConvolutionInfo, dir_i: usize) -> Self {
@@ -36,6 +38,7 @@ impl FlatApplyDir {
             n_params: conv_info.param_info.size as u32,
             lr: conv_info.lr,
             mr: conv_info.mr,
+            vr: conv_info.vr,
         };
     }
 }
@@ -86,6 +89,26 @@ impl ErrorPC {
         return ErrorPC {
             layer_idx: (dr.n_batches * slot_size * dr.sub_batch_i) as u32,
             n_batches: dr.n_batches as u32,
+            _pad2: 0,
+            _pad3: 0,
+        };
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct ApplyPC {
+    mr_dec: f32,
+    vr_dec: f32,
+    _pad2: u32,
+    _pad3: u32,
+}
+
+impl ApplyPC {
+    pub fn new(t_i: u32, mr: f32, vr: f32) -> Self {
+        return ApplyPC {
+            mr_dec: mr.powf(t_i as f32),
+            vr_dec: vr.powf(t_i as f32),
             _pad2: 0,
             _pad3: 0,
         };
@@ -195,6 +218,14 @@ impl MatrixDir {
         let ping_switch = dir_i % 2;
         let pong_switch = (dir_i + 1) % 2;
 
+        let a_func_type: u32;
+
+        if dir_i == nn_info.n_layers - 2 {
+            a_func_type = 0;
+        } else {
+            a_func_type = 1;
+        }
+
         return MatrixDir {
             n_read_start: nn_info.layer_info[dir_i].offset as u32,
             m_read_start: nn_info.activity_info.a_swap_buffer_size as u32 * ping_switch as u32,
@@ -208,7 +239,7 @@ impl MatrixDir {
             add_const: 1,
             c_start: (nn_info.layer_info[dir_i].offset + nn_info.layer_dim[dir_i]) as u32,
             c_stride_length: (nn_info.layer_dim[dir_i] + 1) as u32,
-            a_func_type: 1,
+            a_func_type: a_func_type,
 
             extra: 1,
             e_start: nn_info.activity_info.s_start as u32

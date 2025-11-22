@@ -1,4 +1,5 @@
 use crate::data_reader::DataReader;
+use crate::functions::get_mb;
 use crate::model::ModelConstructor;
 use crate::tensor::*;
 use itertools::Itertools;
@@ -72,6 +73,7 @@ pub struct NNConstructor {
     pub n_batches: usize,
     pub lr: f32,
     pub mr: f32,
+    pub vr: f32,
 }
 
 impl NNConstructor {
@@ -81,6 +83,7 @@ impl NNConstructor {
             n_batches: 0,
             lr: 0.0,
             mr: 0.0,
+            vr: 0.0,
         };
     }
 
@@ -92,6 +95,7 @@ impl NNConstructor {
             n_batches: model_constructor.n_batches,
             lr: model_constructor.lr,
             mr: model_constructor.mr,
+            vr: model_constructor.vr,
         };
     }
 
@@ -204,6 +208,7 @@ pub struct NeuralNetworkInfo {
     pub n_batches: usize,
     pub lr: f32,
     pub mr: f32,
+    pub vr: f32,
 }
 
 impl NeuralNetworkInfo {
@@ -213,6 +218,7 @@ impl NeuralNetworkInfo {
             nn_constructor.n_batches,
             nn_constructor.lr,
             nn_constructor.mr,
+            nn_constructor.vr,
         );
     }
 
@@ -227,6 +233,7 @@ impl NeuralNetworkInfo {
             n_batches: 0,
             lr: 0.0,
             mr: 0.0,
+            vr: 0.0,
         };
     }
 
@@ -238,12 +245,14 @@ impl NeuralNetworkInfo {
         println!("\nACTIVITY:");
         println!("Activity Strides: {:?}", self.activity_info.a_strides);
         println!(
-            "Ping Pong Buffer length: {} floats",
-            self.activity_info.a_deriv_buffer_size
+            "Ping Pong Buffer length: {} floats ({}MB)",
+            self.activity_info.a_deriv_buffer_size,
+            get_mb(self.activity_info.a_deriv_buffer_size)
         );
         println!(
-            "Total Buffer Length: {} floats",
-            self.activity_info.a_length
+            "Total Buffer Length: {} floats ({}MB)",
+            self.activity_info.a_length,
+            get_mb(self.activity_info.a_length)
         );
 
         println!("\nPARAMETERS:");
@@ -251,7 +260,11 @@ impl NeuralNetworkInfo {
         for p in &self.layer_info {
             println!(" - {:?} {}", p.tens_dim, p.offset);
         }
-        println!("Total Buffer Length: {} floats", self.p_length);
+        println!(
+            "Total Buffer Length: {} floats ({}MB)",
+            self.p_length,
+            get_mb(self.p_length)
+        );
         println!("");
     }
 
@@ -282,6 +295,7 @@ impl NeuralNetworkInfo {
         n_batches: usize,
         learning_rate: f32,
         momentum_rate: f32,
+        variance_rate: f32,
     ) -> Self {
         let n_layers = nn_dim.len();
 
@@ -323,6 +337,7 @@ impl NeuralNetworkInfo {
             n_batches: n_batches,
             lr: learning_rate,
             mr: momentum_rate,
+            vr: variance_rate,
         };
     }
 

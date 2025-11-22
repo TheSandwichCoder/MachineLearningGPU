@@ -47,6 +47,7 @@ pub struct ConvConstructor {
 
     pub lr: f32,
     pub mr: f32,
+    pub vr: f32,
 }
 
 impl ConvConstructor {
@@ -65,6 +66,7 @@ impl ConvConstructor {
 
             lr: 0.1,
             mr: 0.9,
+            vr: 0.999,
         };
     }
 
@@ -75,12 +77,13 @@ impl ConvConstructor {
             i_c: model_constructor.conv_input_layer_dim[2],
             n_layers: model_constructor.conv_n_layers,
             n_batches: model_constructor.n_batches as usize,
-            split_k: 16,
+            split_k: 256,
             pooling_dim: model_constructor.conv_pooling_dim.clone(),
             kernal_dim: model_constructor.conv_kernal_dim.clone(),
             layer_output: model_constructor.conv_layer_output.clone(),
             lr: model_constructor.lr,
             mr: model_constructor.mr,
+            vr: model_constructor.vr,
         };
     }
 
@@ -124,6 +127,7 @@ pub struct ConvolutionInfo {
 
     pub lr: f32,
     pub mr: f32,
+    pub vr: f32,
 }
 
 impl ConvolutionInfo {
@@ -195,6 +199,7 @@ impl ConvolutionInfo {
 
             lr: constructor.lr,
             mr: constructor.mr,
+            vr: constructor.vr,
         };
     }
 
@@ -229,29 +234,41 @@ impl ConvolutionInfo {
         println!("\nACTIVITY INFO");
         println!("Activity Strides: {:?}", self.activity_info.strides);
         println!(
-            "Deriv Swap Buffer length: {} floats",
-            self.activity_info.deriv_buffer_size * 2
+            "Deriv Swap Buffer length: {} floats ({}MB)",
+            self.activity_info.deriv_buffer_size * 2,
+            get_mb(self.activity_info.deriv_buffer_size * 2)
         );
         println!(
-            "Output Swap Buffer length: {} floats",
-            self.activity_info.swap_buffer_size * 2
+            "Output Swap Buffer length: {} floats ({}MB)",
+            self.activity_info.swap_buffer_size * 2,
+            get_mb(self.activity_info.deriv_buffer_size * 2)
         );
         println!(
-            "Output Storage Buffer length: {} floats",
-            self.activity_info.storage_buffer_size
+            "Output Storage Buffer length: {} floats ({}MB)",
+            self.activity_info.storage_buffer_size,
+            get_mb(self.activity_info.storage_buffer_size)
         );
+
+        let total_length = self.activity_info.deriv_buffer_size * 2
+            + self.activity_info.swap_buffer_size * 2
+            + self.activity_info.storage_buffer_size;
+
         println!(
-            "Total Buffer Length: {} floats",
-            self.activity_info.deriv_buffer_size * 2
-                + self.activity_info.swap_buffer_size * 2
-                + self.activity_info.storage_buffer_size
+            "Total Buffer Length: {} floats ({}MB)",
+            total_length,
+            get_mb(total_length)
         );
 
         println!("\nPARAM INFO");
 
         println!("Param Kernal Strides: {:?}", self.param_info.k_strides);
         println!("Param Bias Strides: {:?}", self.param_info.b_strides);
-        println!("Total Buffer Length: {} floats", self.param_info.size);
+        println!(
+            "Total Buffer Length: {} floats ({}MB)",
+            self.param_info.size,
+            get_mb(self.param_info.size)
+        );
+        println!("\n");
     }
 
     pub fn get_save_string(&self, param_slice: &[f32]) -> String {
@@ -280,7 +297,7 @@ impl ConvolutionInfo {
                 let start_i = self.param_info.k_strides[layer_info_i] + kernal.size * kernal_i;
                 let end_i = self.param_info.k_strides[layer_info_i] + kernal.size * (kernal_i + 1);
 
-                let bias_i = self.param_info.b_strides[layer_info_i] + kernal_i;
+                let bias_i = self.param_info.b_strides[layer_info_i] + kernal_i + 1;
 
                 save_string += &format!(
                     "{} {}\n",
