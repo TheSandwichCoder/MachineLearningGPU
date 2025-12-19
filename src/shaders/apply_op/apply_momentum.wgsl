@@ -45,7 +45,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let gradient_update = momentum_corrected / (sqrt(variance_corrected) + EPS);
 
-    params[param_i] += gradient_update * nn_dir.lr;
+    // params[param_i] -= gradient_corrected * nn_dir.lr;
+    params[param_i] -= gradient_update * nn_dir.lr;
     momentum[param_i] = momentum_value;
     variance[param_i] = variance_value;
 }

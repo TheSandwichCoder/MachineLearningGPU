@@ -51,6 +51,7 @@ pub struct ErrorDir {
     n_outputs: u32,
     ping_start: u32,
     data_size: u32,
+    n_batches: u32,
 }
 
 impl ErrorDir {
@@ -68,6 +69,7 @@ impl ErrorDir {
                 + ping_switch * nn_info.activity_info.a_deriv_buffer_size)
                 as u32,
             data_size: data_reader.data_value_size as u32,
+            n_batches: nn_info.n_batches as u32,
         };
     }
 }

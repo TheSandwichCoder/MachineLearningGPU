@@ -77,7 +77,7 @@ impl ConvConstructor {
             i_c: model_constructor.conv_input_layer_dim[2],
             n_layers: model_constructor.conv_n_layers,
             n_batches: model_constructor.n_batches as usize,
-            split_k: 256,
+            split_k: 1024,
             pooling_dim: model_constructor.conv_pooling_dim.clone(),
             kernal_dim: model_constructor.conv_kernal_dim.clone(),
             layer_output: model_constructor.conv_layer_output.clone(),
@@ -271,6 +271,48 @@ impl ConvolutionInfo {
         println!("\n");
     }
 
+    pub fn load_param_buffer(&self, file_string: &str) -> Vec<f32> {
+        let mut param_buffer: Vec<f32> = Vec::new();
+        let mut bias_buffer: Vec<f32> = Vec::new();
+
+        let file_lines: Vec<&str> = file_string.split("\n").collect();
+
+        let nn_dim: Vec<&str> = file_lines[0].trim().split(" ").collect();
+
+        let mut conv_line_start: usize = 0;
+
+        // skip nn description
+        for layer_i in 1..nn_dim.len() {
+            let v: usize = nn_dim[layer_i].parse().unwrap();
+            conv_line_start += v;
+        }
+
+        // skip n layers
+        conv_line_start += 1;
+        // skip layer descriptions
+        conv_line_start += self.n_layers;
+
+        let mut curr_line = conv_line_start;
+
+        // add the weights
+        for conv_layer in &self.conv_layers {
+            for kernal_i in 0..conv_layer.n_kernals {
+                let layer_weights: Vec<&str> = file_lines[curr_line].trim().split(" ").collect();
+
+                for w_i in 0..conv_layer.kernal_info.size {
+                    param_buffer.push(layer_weights[w_i].parse().unwrap());
+                }
+                bias_buffer.push(layer_weights[conv_layer.kernal_info.size].parse().unwrap());
+
+                curr_line += 1;
+            }
+        }
+
+        param_buffer.extend(bias_buffer);
+
+        return param_buffer;
+    }
+
     pub fn get_save_string(&self, param_slice: &[f32]) -> String {
         let mut layer_i = 0;
         let mut save_string = String::new();
@@ -297,7 +339,8 @@ impl ConvolutionInfo {
                 let start_i = self.param_info.k_strides[layer_info_i] + kernal.size * kernal_i;
                 let end_i = self.param_info.k_strides[layer_info_i] + kernal.size * (kernal_i + 1);
 
-                let bias_i = self.param_info.b_strides[layer_info_i] + kernal_i + 1;
+                let bias_i =
+                    self.param_info.b_offset + self.param_info.b_strides[layer_info_i] + kernal_i;
 
                 save_string += &format!(
                     "{} {}\n",
@@ -604,7 +647,6 @@ impl ConvParamInfo {
             size: t_size,
         };
     }
-
     // weights for the model
     pub fn create_buffer(&self) -> Vec<f32> {
         // let mut empty_vec = vec![1.0; self.size];

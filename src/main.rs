@@ -30,6 +30,7 @@ use crate::conv_datatypes::*;
 // conv backward (with deriv)
 // nn forward and backward
 // storage buffer (single pass)
+// [62007, 57993]
 
 fn main() {
     // pollster::block_on(run()););
@@ -38,18 +39,18 @@ fn main() {
     model_construct.set_conv_n_layers(4);
     model_construct.set_conv_input_layer_dim(vec![28, 28, 1]);
 
-    model_construct.add_kernal_layer(3, 2, 16);
-    model_construct.add_kernal_layer(3, 1, 32);
-    model_construct.add_kernal_layer(3, 2, 32);
+    model_construct.add_kernal_layer(4, 2, 32);
+    model_construct.add_kernal_layer(3, 1, 64);
+    model_construct.add_kernal_layer(2, 2, 32);
 
     model_construct.set_nn_dim(vec![0, 512, 256, 26]);
 
-    model_construct.set_lr(0.001);
+    model_construct.set_lr(0.00001);
     model_construct.set_mr(0.9);
     model_construct.set_vr(0.999);
 
     model_construct.set_batch(16);
-    model_construct.set_epochs(10);
+    model_construct.set_epochs(5);
 
     // model_construct.set_data_mnist();
     model_construct.set_data_mnist_letters();
@@ -60,7 +61,9 @@ fn main() {
 
     // convnn_model.debug();
 
+    // convnn_model.load();
+
     convnn_model.train();
     convnn_model.test();
-    convnn_model.save();
+    // convnn_model.save();
 }

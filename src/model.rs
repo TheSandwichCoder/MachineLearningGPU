@@ -94,7 +94,7 @@ impl ModelConstructor {
     }
 
     pub fn set_data_mnist(&mut self) {
-        self.set_data_info(String::from("datasets/mnist_numbers.csv"), 256, 1, 784);
+        self.set_data_info(String::from("datasets/mnist_numbers.csv"), 42001, 1, 784);
         self.load_all_data();
     }
 
@@ -331,6 +331,15 @@ impl ConvNNModel {
 
         self.nn_dispatch.read_back_act_single(&self.gpu_instance);
         self.conv_dispatch.read_back_act_single(&self.gpu_instance);
+    }
+
+    pub fn load(&mut self) {
+        let file_string = fs::read_to_string("saves/saved_convnn.txt").unwrap();
+
+        self.nn_dispatch
+            .load_params(&self.gpu_instance, &file_string);
+        self.conv_dispatch
+            .load_params(&self.gpu_instance, &file_string);
     }
 
     pub fn train(&mut self) {

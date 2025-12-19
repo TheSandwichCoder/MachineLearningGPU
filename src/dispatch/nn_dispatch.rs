@@ -912,8 +912,11 @@ impl NNDispatch {
 
             pass.set_pipeline(&self.momentum_pass_info.pipeline);
 
+            // todo find out why there are n batches here
+
             for batch_i in 0..self.nn_info.n_batches {
-                let dyn_off = batch_i as u32 * self.momentum_pass_info.dir_slot_size as u32;
+                // let batch_i = 0;
+                let dyn_off = 0 as u32 * self.momentum_pass_info.dir_slot_size as u32;
                 pass.set_bind_group(0, &self.momentum_pass_info.bind_group, &[dyn_off]);
 
                 let gx = ceil_div(
@@ -1142,6 +1145,14 @@ impl NNDispatch {
 
         drop(data);
         self.out_buffer.unmap();
+    }
+
+    pub fn load_params(&self, gpu_instance: &GPUInstance, file_str: &str) {
+        gpu_instance.queue.write_buffer(
+            &self.param_buffer,
+            0,
+            bytemuck::cast_slice(&self.nn_info.load_param_buffer(file_str)),
+        );
     }
 
     pub fn get_param_slice(&self, gpu_instance: &GPUInstance) -> Vec<f32> {

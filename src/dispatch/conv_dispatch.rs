@@ -1628,6 +1628,14 @@ impl ConvDispatch {
         };
     }
 
+    pub fn load_params(&self, gpu_instance: &GPUInstance, file_str: &str) {
+        gpu_instance.queue.write_buffer(
+            &self.param_buffer,
+            0,
+            bytemuck::cast_slice(&self.conv_info.load_param_buffer(file_str)),
+        );
+    }
+
     pub fn update_momentum(&self, gpu_instance: &GPUInstance, t_i: u32) {
         let mut encoder =
             gpu_instance

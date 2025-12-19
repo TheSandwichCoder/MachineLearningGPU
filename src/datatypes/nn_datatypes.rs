@@ -290,6 +290,35 @@ impl NeuralNetworkInfo {
         return buf;
     }
 
+    pub fn load_param_buffer(&self, file_string: &str) -> Vec<f32> {
+        let mut param_buffer: Vec<f32> = Vec::new();
+
+        let file_lines: Vec<&str> = file_string.trim().split("\n").collect();
+        let mut curr_line = 0;
+
+        // skip nn dim
+        curr_line += 1;
+
+        for layer_i in 0..self.n_layers - 1 {
+            let n_inputs = self.layer_dim[layer_i];
+            let n_outputs = self.layer_dim[layer_i + 1];
+
+            for _output_layer_i in 0..n_outputs {
+                let layer_weights: Vec<&str> = file_lines[curr_line].trim().split(" ").collect();
+
+                for w_i in 0..n_inputs {
+                    param_buffer.push(layer_weights[w_i].parse().unwrap());
+                }
+
+                param_buffer.push(layer_weights[n_inputs].parse().unwrap());
+
+                curr_line += 1;
+            }
+        }
+
+        return param_buffer;
+    }
+
     pub fn new(
         nn_dim: &Vec<usize>,
         n_batches: usize,

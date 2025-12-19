@@ -4,6 +4,7 @@ struct NNDir{
     n_outputs: u32,
     ping_start: u32,
     data_size: u32,
+    n_batches: u32,
 };
 
 struct PC {
@@ -24,7 +25,7 @@ var<push_constant> pc: PC;
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let batch_i = gid.x;
     
-    if (batch_i >= 16){
+    if (batch_i >= nn_dir.n_batches){
         return;
     }
 
@@ -39,10 +40,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     for (var output_i:u32 = 0; output_i < nn_dir.n_outputs; output_i += 1){
         if (output_i == label){
-            activities[act_start + nn_dir.ping_start + output_i] = 1.0 - outputs[output_i];
+            activities[act_start + nn_dir.ping_start + output_i] = outputs[output_i] - 1.0;
         }
         else{
-            activities[act_start + nn_dir.ping_start + output_i] = -outputs[output_i];
+            activities[act_start + nn_dir.ping_start + output_i] = outputs[output_i];
         }
     }
 }
