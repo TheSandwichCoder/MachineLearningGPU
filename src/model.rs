@@ -17,6 +17,7 @@ pub struct ModelConstructor {
     pub conv_pooling_dim: Vec<usize>,
     pub conv_kernal_dim: Vec<usize>,
     pub conv_layer_output: Vec<usize>,
+    pub split_k: usize,
 
     pub n_batches: usize,
 
@@ -41,6 +42,7 @@ impl ModelConstructor {
             conv_pooling_dim: Vec::new(),
             conv_kernal_dim: Vec::new(),
             conv_layer_output: Vec::new(),
+            split_k: 256,
 
             n_batches: 16,
             data_batches_per_load: 100,
@@ -91,6 +93,10 @@ impl ModelConstructor {
 
     pub fn set_epochs(&mut self, epochs: usize) {
         self.n_epochs = epochs;
+    }
+
+    pub fn set_split_k(&mut self, split_k: usize) {
+        self.split_k = split_k;
     }
 
     pub fn set_data_mnist(&mut self) {
@@ -329,7 +335,17 @@ impl ConvNNModel {
 
         self.nn_dispatch.forward_mat(&self.gpu_instance);
 
-        self.nn_dispatch.read_back_act_single(&self.gpu_instance);
+        self.data_dispatch.apply_error(&self.gpu_instance);
+
+        self.nn_dispatch.backward_mat_convnn(&self.gpu_instance);
+
+        // self.conv_dispatch
+        //     .transfer_nn_deriv(&self.gpu_instance, &self.nn_dispatch);
+
+        // self.conv_dispatch.backward_conv_full(&self.gpu_instance);
+
+        // self.nn_dispatch.read_back_gradients(&self.gpu_instance);
+        // self.nn_dispatch.read_back_act_single(&self.gpu_instance);
         self.conv_dispatch.read_back_act_single(&self.gpu_instance);
     }
 

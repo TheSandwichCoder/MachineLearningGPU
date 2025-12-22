@@ -77,7 +77,7 @@ impl ConvConstructor {
             i_c: model_constructor.conv_input_layer_dim[2],
             n_layers: model_constructor.conv_n_layers,
             n_batches: model_constructor.n_batches as usize,
-            split_k: 1024,
+            split_k: model_constructor.split_k,
             pooling_dim: model_constructor.conv_pooling_dim.clone(),
             kernal_dim: model_constructor.conv_kernal_dim.clone(),
             layer_output: model_constructor.conv_layer_output.clone(),

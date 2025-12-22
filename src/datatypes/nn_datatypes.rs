@@ -377,6 +377,8 @@ impl NeuralNetworkInfo {
     pub fn read_readback(&self, param_slice: &[f32]) {
         let mut layer_i = 0;
         for layer_info_i in &self.layer_info {
+            // let layer_info_i = &self.layer_info[self.n_layers - 2];
+            // layer_i = self.n_layers - 2;
             println!("l{}->l{}: ", layer_i, layer_i + 1);
 
             let input_layer_n = self.layer_dim[layer_i];
@@ -459,7 +461,7 @@ impl ParamsDir {
         let mut rng = rand::thread_rng();
 
         let random_floats: Vec<f32> = (0..self.buffer_size)
-            .map(|_| rng.gen_range(-1.0..=1.0))
+            .map(|_| rng.gen_range(-0.1..=0.1))
             .collect();
 
         return random_floats;

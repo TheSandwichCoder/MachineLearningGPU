@@ -60,6 +60,12 @@ impl ErrorDir {
 
         let ping_switch = (last_layer_i - 1) % 2;
 
+        // println!(
+        //     "{}",
+        //     (nn_info.activity_info.d_start
+        //         + ping_switch * nn_info.activity_info.a_deriv_buffer_size)
+        // );
+
         return ErrorDir {
             act_size: nn_info.activity_info.a_length as u32,
             outputs_offset: nn_info.activity_info.s_start as u32

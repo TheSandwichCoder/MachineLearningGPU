@@ -914,22 +914,22 @@ impl NNDispatch {
 
             // todo find out why there are n batches here
 
-            for batch_i in 0..self.nn_info.n_batches {
-                // let batch_i = 0;
-                let dyn_off = 0 as u32 * self.momentum_pass_info.dir_slot_size as u32;
-                pass.set_bind_group(0, &self.momentum_pass_info.bind_group, &[dyn_off]);
+            // for batch_i in 0..self.nn_info.n_batches {
+            let batch_i = 0;
+            let dyn_off = 0 as u32 * self.momentum_pass_info.dir_slot_size as u32;
+            pass.set_bind_group(0, &self.momentum_pass_info.bind_group, &[dyn_off]);
 
-                let gx = ceil_div(
-                    self.nn_info.p_length,
-                    self.momentum_pass_info.workgroup_dim.x,
-                );
+            let gx = ceil_div(
+                self.nn_info.p_length,
+                self.momentum_pass_info.workgroup_dim.x,
+            );
 
-                let params = ApplyPC::new(t_i, self.nn_info.mr, self.nn_info.vr);
+            let params = ApplyPC::new(t_i, self.nn_info.mr, self.nn_info.vr);
 
-                pass.set_push_constants(0, bytemuck::bytes_of(&params));
+            pass.set_push_constants(0, bytemuck::bytes_of(&params));
 
-                pass.dispatch_workgroups(gx as u32, 1, 1);
-            }
+            pass.dispatch_workgroups(gx as u32, 1, 1);
+            // }
         }
 
         let momentum_commands = encoder.finish();
@@ -1011,12 +1011,14 @@ impl NNDispatch {
                 });
 
         // 0 - storage buffer
-        let read_back_type = 0;
+        // 1 - errors
+        // 2 - final layer
+        let read_back_type = 2;
 
         let mut start_idx = 0;
         let mut read_back_length = 0;
 
-        let square_shape = 14;
+        let square_shape = 0;
 
         let batch_i_offset = self.nn_info.activity_info.a_length * 1;
 
@@ -1031,6 +1033,14 @@ impl NNDispatch {
         if read_back_type == 0 {
             start_idx = self.nn_info.activity_info.s_start;
             read_back_length = 200;
+        } else if read_back_type == 1 {
+            start_idx =
+                self.nn_info.activity_info.a_deriv_buffer_size * (self.nn_info.n_layers - 2) % 2;
+            read_back_length = 10;
+        } else if read_back_type == 2 {
+            start_idx = self.nn_info.activity_info.s_start
+                + self.nn_info.activity_info.a_strides[self.nn_info.n_layers - 1];
+            read_back_length = 256;
         }
 
         gpu_instance.queue.submit(Some(encoder.finish()));
