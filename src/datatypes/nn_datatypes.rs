@@ -1,5 +1,5 @@
 use crate::data_reader::DataReader;
-use crate::functions::get_mb;
+use crate::functions::*;
 use crate::model::ModelConstructor;
 use crate::tensor::*;
 use itertools::Itertools;
@@ -254,6 +254,9 @@ impl NeuralNetworkInfo {
             self.activity_info.a_length,
             get_mb(self.activity_info.a_length)
         );
+        let (forward_flops, training_flops) = self.get_n_flops();
+        println!("Forward Compute: {}GFLOPS", get_gflops(forward_flops));
+        println!("Training Compute: {}GFLOPS", get_gflops(training_flops));
 
         println!("\nPARAMETERS:");
         println!("Param Dim + Offset:");
@@ -266,6 +269,16 @@ impl NeuralNetworkInfo {
             get_mb(self.p_length)
         );
         println!("");
+    }
+
+    pub fn get_n_flops(&self) -> (usize, usize) {
+        let mut total_flops: usize = 0;
+        for layer_i in 0..self.n_layers - 1 {
+            total_flops +=
+                self.layer_dim[layer_i] * self.layer_dim[layer_i + 1] * self.n_batches * 2;
+        }
+
+        return (total_flops, total_flops * 3);
     }
 
     pub fn get_n_layers(&self) -> usize {

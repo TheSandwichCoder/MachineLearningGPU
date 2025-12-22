@@ -1,9 +1,11 @@
+use crate::constants::*;
 use crate::data_reader::DataConstructor;
 use crate::datatypes::conv_datatypes::*;
 use crate::datatypes::nn_datatypes::*;
 use crate::dispatch::data_dispatch;
 use crate::dispatch::data_dispatch::DataDispatch;
 use crate::dispatch::{conv_dispatch::*, gpu_instance::*, nn_dispatch::*};
+use crate::functions::*;
 use std::time::{Duration, Instant};
 
 use std::fs;
@@ -57,6 +59,70 @@ impl ModelConstructor {
         };
     }
 
+    pub fn load_specs() -> Self {
+        let file_string = fs::read_to_string("saves/saved_convnn.txt").unwrap();
+
+        let file_lines: Vec<&str> = file_string.trim().split("\n").collect();
+
+        let nn_dim_str: Vec<&str> = file_lines[0].trim().split(" ").collect();
+
+        let mut nn_dim = Vec::new();
+        let mut conv_line_skip = 1;
+        for layer_i in 0..nn_dim_str.len() {
+            let layer_usize: usize = nn_dim_str[layer_i].parse().unwrap();
+
+            if layer_i != 0 {
+                conv_line_skip += layer_usize;
+            }
+            nn_dim.push(layer_usize);
+        }
+
+        let conv_n_layers: usize = file_lines[conv_line_skip].parse().unwrap();
+
+        let input_layer_info: Vec<&str> =
+            file_lines[conv_line_skip + 1].trim().split(" ").collect();
+
+        let conv_input_layer_dim: Vec<usize> = vec![
+            input_layer_info[0].parse().unwrap(),
+            input_layer_info[1].parse().unwrap(),
+            input_layer_info[2].parse().unwrap(),
+        ];
+
+        let mut conv_pooling_dim: Vec<usize> = Vec::new();
+        let mut conv_kernal_dim: Vec<usize> = Vec::new();
+        let mut conv_layer_output: Vec<usize> = Vec::new();
+
+        for layer_i in 0..conv_n_layers {
+            let layer_info: Vec<&str> = file_lines[conv_line_skip + 2 + layer_i]
+                .trim()
+                .split(" ")
+                .collect();
+
+            conv_kernal_dim.push(layer_info[0].parse().unwrap());
+            conv_pooling_dim.push(layer_info[4].parse().unwrap());
+            conv_layer_output.push(layer_info[3].parse().unwrap());
+        }
+
+        return ModelConstructor {
+            nn_dim: nn_dim,
+            conv_n_layers: conv_n_layers + 1,
+            conv_input_layer_dim: conv_input_layer_dim,
+            conv_pooling_dim: conv_pooling_dim,
+            conv_kernal_dim: conv_kernal_dim,
+            conv_layer_output: conv_layer_output,
+            split_k: 256,
+            n_batches: 16,
+            data_batches_per_load: 100,
+            n_epochs: 1,
+            data_path: String::from(""),
+            dataset_length: 0,
+            data_value_size: 0,
+            lr: 0.1,
+            mr: 0.9,
+            vr: 0.999,
+        };
+    }
+
     pub fn set_conv_n_layers(&mut self, n_layers: usize) {
         self.conv_n_layers = n_layers;
     }
@@ -97,6 +163,31 @@ impl ModelConstructor {
 
     pub fn set_split_k(&mut self, split_k: usize) {
         self.split_k = split_k;
+    }
+
+    pub fn set_split_k_auto(&mut self) {
+        let mut greatest_size = 0;
+        for layer_i in 0..self.conv_n_layers - 1 {
+            let prev_layer_size: usize;
+            if layer_i == 0 {
+                prev_layer_size = self.conv_input_layer_dim[2];
+            } else {
+                prev_layer_size = self.conv_layer_output[layer_i - 1];
+            }
+
+            let layer_size = self.conv_kernal_dim[layer_i]
+                * self.conv_kernal_dim[layer_i]
+                * self.conv_layer_output[layer_i]
+                * prev_layer_size;
+
+            if layer_size > greatest_size {
+                greatest_size = layer_size;
+            }
+        }
+        self.split_k = ceil_div_inv_y(
+            LARGEST_BUFFER_SIZE as usize / (self.n_batches * greatest_size),
+            greatest_size,
+        );
     }
 
     pub fn set_data_mnist(&mut self) {
@@ -321,6 +412,28 @@ impl ConvNNModel {
         self.data_dispatch.data_reader.show_all_specs();
     }
 
+    pub fn show_epoch_specs(&self, time_taken: Duration) {
+        let (_forward_nn_flop, training_nn_flop) = self.nn_info.get_n_flops();
+        let (_forward_conv_flop, training_conv_flop) = self.conv_info.get_n_flops();
+
+        let total_flops = (get_gflops(training_nn_flop) + get_gflops(training_conv_flop))
+            * (self.data_dispatch.data_reader.n_sub_batches
+                * self.data_dispatch.data_reader.n_load_batches) as f32;
+
+        let training_size = self.data_dispatch.data_reader.n_load_batches
+            * self.data_dispatch.data_reader.n_sub_batches
+            * self.data_dispatch.data_reader.n_batches;
+
+        let time_taken_seconds = time_taken.as_secs_f64();
+
+        println!(
+            "\n{:?} {} GFLOPS {} samples/s",
+            time_taken,
+            (total_flops as f64 / time_taken_seconds).round(),
+            (training_size as f64 / time_taken_seconds).round(),
+        );
+    }
+
     pub fn debug(&mut self) {
         self.data_dispatch.data_reader.reset_counters();
         self.data_dispatch.load_data(&self.gpu_instance);
@@ -395,6 +508,17 @@ impl ConvNNModel {
 
                     self.data_dispatch.data_reader.increment_sub_batch();
 
+                    show_progress(
+                        self.data_dispatch.data_reader.n_sub_batches
+                            * load_batch_i
+                            * self.model_info.n_batches
+                            + sub_batch_i * self.model_info.n_batches,
+                        load_batch_i,
+                        self.data_dispatch.data_reader.n_load_batches
+                            * self.data_dispatch.data_reader.n_sub_batches
+                            * self.data_dispatch.data_reader.n_batches,
+                    );
+
                     t_i += 1;
                 }
 
@@ -402,7 +526,8 @@ impl ConvNNModel {
             }
 
             self.gpu_instance.device.poll(wgpu::PollType::Wait).unwrap();
-            println!("{:?}", t0.elapsed());
+            self.show_epoch_specs(t0.elapsed());
+            // println!("{:?}", t0.elapsed());
         }
         self.data_dispatch.data_reader.reset_counters();
     }
@@ -431,12 +556,23 @@ impl ConvNNModel {
                 self.data_dispatch.update_metrics(&self.gpu_instance);
 
                 self.data_dispatch.data_reader.increment_sub_batch();
+
+                show_progress(
+                    self.data_dispatch.data_reader.n_sub_batches
+                        * load_batch_i
+                        * self.model_info.n_batches
+                        + sub_batch_i * self.model_info.n_batches,
+                    load_batch_i,
+                    self.data_dispatch.data_reader.n_load_batches
+                        * self.data_dispatch.data_reader.n_sub_batches
+                        * self.data_dispatch.data_reader.n_batches,
+                );
             }
 
             self.data_dispatch.data_reader.increment_load_batch();
         }
         self.gpu_instance.device.poll(wgpu::PollType::Wait).unwrap();
-        println!("{:?}", t0.elapsed());
+        println!("\n{:?}", t0.elapsed());
 
         self.data_dispatch.read_back_metrics(&self.gpu_instance);
     }

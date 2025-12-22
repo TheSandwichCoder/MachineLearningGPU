@@ -885,7 +885,16 @@ impl DataDispatch {
         let data = slice.get_mapped_range();
         let out: &[u32] = bytemuck::cast_slice(&data);
 
-        println!("{:?}", &out[..2]);
+        let n_correct = out[0];
+        let n_wrong = out[1];
+        let n_total = n_correct + n_wrong;
+
+        println!(
+            "{} / {} ({:.0}%)",
+            n_correct,
+            n_total,
+            (n_correct as f32 / n_total as f32 * 100.0)
+        );
 
         drop(data);
         self.out_buffer.unmap();

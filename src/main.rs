@@ -3,6 +3,7 @@ use std::num::NonZeroU64;
 use std::time::Instant;
 use wgpu::util::DeviceExt;
 
+mod constants;
 mod data_reader;
 mod datatypes;
 mod dispatch;
@@ -33,24 +34,25 @@ use crate::conv_datatypes::*;
 
 fn main() {
     // pollster::block_on(run()););
-    let mut model_construct = ModelConstructor::default();
+    // let mut model_construct = ModelConstructor::default();
 
-    model_construct.set_conv_n_layers(4);
-    model_construct.set_conv_input_layer_dim(vec![28, 28, 1]);
+    // model_construct.set_conv_n_layers(4);
+    // model_construct.set_conv_input_layer_dim(vec![28, 28, 1]);
 
-    model_construct.add_kernal_layer(4, 2, 64);
-    model_construct.add_kernal_layer(3, 1, 128);
-    model_construct.add_kernal_layer(2, 2, 64);
+    // model_construct.add_kernal_layer(2, 2, 32);
+    // model_construct.add_kernal_layer(3, 1, 64);
+    // model_construct.add_kernal_layer(2, 2, 32);
 
-    model_construct.set_nn_dim(vec![0, 512, 256, 26]);
+    // model_construct.set_nn_dim(vec![0, 512, 256, 26]);
+    let mut model_construct = ModelConstructor::load_specs();
 
     model_construct.set_lr(0.0001);
     model_construct.set_mr(0.9);
     model_construct.set_vr(0.999);
-    model_construct.set_split_k(1024);
 
     model_construct.set_batch(16);
-    model_construct.set_epochs(3);
+    model_construct.set_split_k_auto();
+    model_construct.set_epochs(5);
 
     // model_construct.set_data_mnist();
     model_construct.set_data_mnist_letters();
@@ -63,8 +65,8 @@ fn main() {
 
     convnn_model.load();
 
-    convnn_model.train();
     convnn_model.test();
+    convnn_model.train();
     convnn_model.save();
 }
 

@@ -203,6 +203,20 @@ impl ConvolutionInfo {
         };
     }
 
+    pub fn get_n_flops(&self) -> (usize, usize) {
+        let mut total_flops = 0;
+        for layer_i in 0..self.n_layers {
+            let conv_layer = &self.conv_layers[layer_i];
+            total_flops += 2
+                * self.n_batches
+                * conv_layer.layer_size
+                * conv_layer.n_kernals
+                * conv_layer.layer_size_2d;
+        }
+
+        return (total_flops, total_flops * 3);
+    }
+
     pub fn show_all_specs(&self) {
         println!("\nCONVOLUTION LAYERS");
 
@@ -220,6 +234,7 @@ impl ConvolutionInfo {
                 get_vec_product(&self.conv_layers[conv_layer_i].layer_dim)
             );
         }
+        println!("{}", self.split_k);
 
         println!("Kernals");
 
@@ -259,6 +274,10 @@ impl ConvolutionInfo {
             get_mb(total_length)
         );
 
+        let (forward_flops, training_flops) = self.get_n_flops();
+        println!("Forward Compute: {}GFLOP", get_gflops(forward_flops));
+        println!("Training Compute: {}GFLOP", get_gflops(training_flops));
+
         println!("\nPARAM INFO");
 
         println!("Param Kernal Strides: {:?}", self.param_info.k_strides);
@@ -289,6 +308,8 @@ impl ConvolutionInfo {
 
         // skip n layers
         conv_line_start += 1;
+        // skip input layer dim
+        conv_line_start += 1;
         // skip layer descriptions
         conv_line_start += self.n_layers;
 
@@ -318,6 +339,13 @@ impl ConvolutionInfo {
         let mut save_string = String::new();
 
         save_string += &format!("{}\n", self.n_layers - 1);
+
+        save_string += &format!(
+            "{} {} {}\n",
+            self.conv_layers[0].layer_dim[0],
+            self.conv_layers[0].layer_dim[1],
+            self.conv_layers[0].layer_dim[2]
+        );
 
         for layer_i in 0..self.n_layers - 1 {
             let conv_layer = &self.conv_layers[layer_i];

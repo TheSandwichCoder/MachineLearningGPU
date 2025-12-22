@@ -183,7 +183,6 @@ impl DataReader {
             buffer_vec.extend(data.info.iter());
         }
 
-        println!("{} {}", start_idx, stop_idx);
         return buffer_vec;
     }
 

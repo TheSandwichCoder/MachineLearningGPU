@@ -1,0 +1,1 @@
+pub const LARGEST_BUFFER_SIZE: u32 = 134217728 / 4;
