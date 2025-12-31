@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::string;
 
 use crate::functions::*;
 use crate::model::ModelConstructor;
@@ -83,6 +84,25 @@ impl DataValue {
             label: label,
             info: info_vec,
             data_size: 784,
+        };
+    }
+
+    pub fn from_mnist_downsampled(srecord: &csv::StringRecord) -> DataValue {
+        let label = srecord[0].parse::<f32>().unwrap();
+
+        let mut info_vec = Vec::new();
+
+        let mut value_i = 1;
+        while value_i < 197 {
+            let value = srecord[value_i].parse::<f32>().unwrap();
+            info_vec.push(value / 255.0);
+            value_i += 1;
+        }
+
+        return DataValue {
+            label: label,
+            info: info_vec.clone(),
+            data_size: info_vec.len(),
         };
     }
 
@@ -206,6 +226,7 @@ impl DataReader {
     }
 
     pub fn load_data_single_type(&mut self, string_record: &StringRecord) -> DataValue {
+        // return DataValue::from_mnist_downsampled(string_record);
         // return DataValue::from_mnist(string_record);
         return DataValue::from_mnist_letters(string_record);
     }

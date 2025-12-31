@@ -6,39 +6,36 @@ use csv::Error;
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct FlatApplyDir {
-    batch_start_i: u32,
-    batch_i: u32,
-    gradient_start_i: u32,
-    batch_contribution: f32,
     n_params: u32,
+    n_weights: u32,
+    batch_contribution: f32,
     lr: f32,
     mr: f32,
     vr: f32,
+    wd: f32,
 }
 
 impl FlatApplyDir {
     pub fn new_nn(nn_info: &NeuralNetworkInfo, dir_i: usize) -> Self {
         return FlatApplyDir {
-            batch_start_i: nn_info.activity_info.a_length as u32 * dir_i as u32,
-            batch_i: dir_i as u32,
-            gradient_start_i: 0,
-            batch_contribution: 1.0 / nn_info.n_batches as f32,
             n_params: nn_info.p_length as u32,
+            n_weights: nn_info.p_length as u32, // todo
+            batch_contribution: 1.0 / nn_info.n_batches as f32,
             lr: nn_info.lr,
             mr: nn_info.mr,
             vr: nn_info.vr,
+            wd: 0.0, // todo
         };
     }
     pub fn new_conv(conv_info: &ConvolutionInfo, dir_i: usize) -> Self {
         return FlatApplyDir {
-            batch_start_i: 0 as u32,
-            batch_i: 0 as u32,
-            gradient_start_i: 0,
-            batch_contribution: 1.0 / conv_info.n_batches as f32,
             n_params: conv_info.param_info.size as u32,
+            n_weights: conv_info.param_info.b_offset as u32,
+            batch_contribution: 1.0 / conv_info.n_batches as f32,
             lr: conv_info.lr,
             mr: conv_info.mr,
             vr: conv_info.vr,
+            wd: conv_info.wd,
         };
     }
 }

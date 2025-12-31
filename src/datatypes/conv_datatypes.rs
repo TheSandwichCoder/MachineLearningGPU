@@ -48,6 +48,7 @@ pub struct ConvConstructor {
     pub lr: f32,
     pub mr: f32,
     pub vr: f32,
+    pub wd: f32,
 }
 
 impl ConvConstructor {
@@ -67,6 +68,7 @@ impl ConvConstructor {
             lr: 0.1,
             mr: 0.9,
             vr: 0.999,
+            wd: 0.0001,
         };
     }
 
@@ -84,6 +86,7 @@ impl ConvConstructor {
             lr: model_constructor.lr,
             mr: model_constructor.mr,
             vr: model_constructor.vr,
+            wd: model_constructor.wd,
         };
     }
 
@@ -128,6 +131,7 @@ pub struct ConvolutionInfo {
     pub lr: f32,
     pub mr: f32,
     pub vr: f32,
+    pub wd: f32,
 }
 
 impl ConvolutionInfo {
@@ -200,6 +204,7 @@ impl ConvolutionInfo {
             lr: constructor.lr,
             mr: constructor.mr,
             vr: constructor.vr,
+            wd: constructor.wd,
         };
     }
 

@@ -912,10 +912,6 @@ impl NNDispatch {
 
             pass.set_pipeline(&self.momentum_pass_info.pipeline);
 
-            // todo find out why there are n batches here
-
-            // for batch_i in 0..self.nn_info.n_batches {
-            let batch_i = 0;
             let dyn_off = 0 as u32 * self.momentum_pass_info.dir_slot_size as u32;
             pass.set_bind_group(0, &self.momentum_pass_info.bind_group, &[dyn_off]);
 
@@ -929,7 +925,6 @@ impl NNDispatch {
             pass.set_push_constants(0, bytemuck::bytes_of(&params));
 
             pass.dispatch_workgroups(gx as u32, 1, 1);
-            // }
         }
 
         let momentum_commands = encoder.finish();

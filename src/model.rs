@@ -32,6 +32,7 @@ pub struct ModelConstructor {
     pub lr: f32,
     pub mr: f32,
     pub vr: f32,
+    pub wd: f32,
 }
 
 impl ModelConstructor {
@@ -56,6 +57,7 @@ impl ModelConstructor {
             lr: 0.1,
             mr: 0.9,
             vr: 0.999,
+            wd: 0.0001,
         };
     }
 
@@ -120,11 +122,12 @@ impl ModelConstructor {
             lr: 0.1,
             mr: 0.9,
             vr: 0.999,
+            wd: 0.0001,
         };
     }
 
     pub fn set_conv_n_layers(&mut self, n_layers: usize) {
-        self.conv_n_layers = n_layers;
+        self.conv_n_layers = n_layers + 1;
     }
 
     pub fn set_conv_input_layer_dim(&mut self, input_dim: Vec<usize>) {
@@ -151,6 +154,10 @@ impl ModelConstructor {
 
     pub fn set_vr(&mut self, vr: f32) {
         self.vr = vr;
+    }
+
+    pub fn set_wd(&mut self, wd: f32) {
+        self.wd = wd;
     }
 
     pub fn set_batch(&mut self, batch: usize) {
@@ -190,6 +197,16 @@ impl ModelConstructor {
         );
     }
 
+    pub fn set_data_mnist_downsampled(&mut self) {
+        self.set_data_info(
+            String::from("datasets/mnist_numbers_downsampled.csv"),
+            42001,
+            1,
+            196,
+        );
+        self.load_all_data();
+    }
+
     pub fn set_data_mnist(&mut self) {
         self.set_data_info(String::from("datasets/mnist_numbers.csv"), 42001, 1, 784);
         self.load_all_data();
@@ -225,7 +242,7 @@ impl ModelConstructor {
 }
 //./datasets/testing.csv
 
-pub struct BasicNNModel {
+pub struct NNModel {
     pub nn_info: NeuralNetworkInfo,
     pub gpu_instance: GPUInstance,
     pub nn_dispatch: NNDispatch,
@@ -233,7 +250,7 @@ pub struct BasicNNModel {
     pub model_info: ModelConstructor,
 }
 
-impl BasicNNModel {
+impl NNModel {
     pub fn construct(constructor: ModelConstructor) -> Self {
         let gpu_instance = pollster::block_on(GPUInstance::new());
         let nn_constructor = NNConstructor::from_model_constructor(&constructor);
@@ -244,7 +261,7 @@ impl BasicNNModel {
 
         let nn_info = NeuralNetworkInfo::construct(&nn_constructor);
 
-        return BasicNNModel {
+        return NNModel {
             nn_info: nn_info,
             gpu_instance: gpu_instance,
             nn_dispatch: nn_dispatch,
@@ -288,6 +305,27 @@ impl BasicNNModel {
         // self.nn_dispatch.read_back_params(&self.gpu_instance);
     }
 
+    pub fn show_epoch_specs(&self, time_taken: Duration) {
+        let (_forward_nn_flop, training_nn_flop) = self.nn_info.get_n_flops();
+
+        let total_flops = (get_gflops(training_nn_flop))
+            * (self.data_dispatch.data_reader.n_sub_batches
+                * self.data_dispatch.data_reader.n_load_batches) as f32;
+
+        let training_size = self.data_dispatch.data_reader.n_load_batches
+            * self.data_dispatch.data_reader.n_sub_batches
+            * self.data_dispatch.data_reader.n_batches;
+
+        let time_taken_seconds = time_taken.as_secs_f64();
+
+        println!(
+            "\n{:?} {} GFLOPS {} samples/s",
+            time_taken,
+            (total_flops as f64 / time_taken_seconds).round(),
+            (training_size as f64 / time_taken_seconds).round(),
+        );
+    }
+
     pub fn train(&mut self) {
         let mut sub_batch_i = 0;
 
@@ -295,7 +333,7 @@ impl BasicNNModel {
 
         for epoch_i in 0..self.model_info.n_epochs {
             self.data_dispatch.data_reader.reset_counters();
-            println!("Epoch {}:", epoch_i);
+            println!("Epoch {}:", epoch_i + 1);
             let t0 = Instant::now();
 
             for load_batch_i in 0..self.data_dispatch.data_reader.n_load_batches {
@@ -316,13 +354,23 @@ impl BasicNNModel {
 
                     self.data_dispatch.data_reader.increment_sub_batch();
                     t_i += 1;
+                    show_progress(
+                        self.data_dispatch.data_reader.n_sub_batches
+                            * load_batch_i
+                            * self.model_info.n_batches
+                            + sub_batch_i * self.model_info.n_batches,
+                        load_batch_i,
+                        self.data_dispatch.data_reader.n_load_batches
+                            * self.data_dispatch.data_reader.n_sub_batches
+                            * self.data_dispatch.data_reader.n_batches,
+                    );
                 }
 
                 self.data_dispatch.data_reader.increment_load_batch();
             }
+            self.show_epoch_specs(t0.elapsed());
 
             self.gpu_instance.device.poll(wgpu::PollType::Wait).unwrap();
-            println!("{:?}", t0.elapsed());
         }
     }
 
@@ -347,12 +395,22 @@ impl BasicNNModel {
                 self.data_dispatch.update_metrics(&self.gpu_instance);
 
                 self.data_dispatch.data_reader.increment_sub_batch();
+                show_progress(
+                    self.data_dispatch.data_reader.n_sub_batches
+                        * load_batch_i
+                        * self.model_info.n_batches
+                        + sub_batch_i * self.model_info.n_batches,
+                    load_batch_i,
+                    self.data_dispatch.data_reader.n_load_batches
+                        * self.data_dispatch.data_reader.n_sub_batches
+                        * self.data_dispatch.data_reader.n_batches,
+                );
             }
 
             self.data_dispatch.data_reader.increment_load_batch();
         }
         self.gpu_instance.device.poll(wgpu::PollType::Wait).unwrap();
-        println!("{:?}", t0.elapsed());
+        println!("\n{:?}", t0.elapsed());
 
         self.data_dispatch.read_back_metrics(&self.gpu_instance);
     }
@@ -476,7 +534,7 @@ impl ConvNNModel {
 
         for epoch_i in 0..self.model_info.n_epochs {
             self.data_dispatch.data_reader.reset_counters();
-            println!("Epoch {}:", epoch_i);
+            println!("Epoch {}:", epoch_i + 1);
             let t0 = Instant::now();
 
             for load_batch_i in 0..self.data_dispatch.data_reader.n_load_batches {

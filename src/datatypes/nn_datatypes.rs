@@ -74,6 +74,7 @@ pub struct NNConstructor {
     pub lr: f32,
     pub mr: f32,
     pub vr: f32,
+    pub wd: f32,
 }
 
 impl NNConstructor {
@@ -84,6 +85,7 @@ impl NNConstructor {
             lr: 0.0,
             mr: 0.0,
             vr: 0.0,
+            wd: 0.0,
         };
     }
 
@@ -96,6 +98,7 @@ impl NNConstructor {
             lr: model_constructor.lr,
             mr: model_constructor.mr,
             vr: model_constructor.vr,
+            wd: model_constructor.wd,
         };
     }
 
@@ -209,6 +212,7 @@ pub struct NeuralNetworkInfo {
     pub lr: f32,
     pub mr: f32,
     pub vr: f32,
+    pub wd: f32,
 }
 
 impl NeuralNetworkInfo {
@@ -219,6 +223,7 @@ impl NeuralNetworkInfo {
             nn_constructor.lr,
             nn_constructor.mr,
             nn_constructor.vr,
+            nn_constructor.wd,
         );
     }
 
@@ -234,6 +239,7 @@ impl NeuralNetworkInfo {
             lr: 0.0,
             mr: 0.0,
             vr: 0.0,
+            wd: 0.0,
         };
     }
 
@@ -338,6 +344,7 @@ impl NeuralNetworkInfo {
         learning_rate: f32,
         momentum_rate: f32,
         variance_rate: f32,
+        weight_decay: f32,
     ) -> Self {
         let n_layers = nn_dim.len();
 
@@ -380,6 +387,7 @@ impl NeuralNetworkInfo {
             lr: learning_rate,
             mr: momentum_rate,
             vr: variance_rate,
+            wd: weight_decay,
         };
     }
 
