@@ -709,7 +709,7 @@ impl DataDispatch {
         let data_slot = (self.data_reader.data_value_size + 1);
         // let curr_batch_start = self.data_reader.load_batch_i * self.data_reader.load_batch_length * data_slot  + self.data_reader.sub_batch_i * self.data_reader.sub_batch_length * data_slot;
         let curr_batch_start =
-            self.data_reader.sub_batch_i * self.data_reader.n_batches * data_slot;
+            self.data_reader.get_sub_batch_i() * self.data_reader.n_batches * data_slot;
 
         let nn_info = &nn_dispatch.nn_info;
 
@@ -749,9 +749,8 @@ impl DataDispatch {
                 });
 
         let data_slot = (self.data_reader.data_value_size + 1);
-        // let curr_batch_start = self.data_reader.load_batch_i * self.data_reader.load_batch_length * data_slot  + self.data_reader.sub_batch_i * self.data_reader.sub_batch_length * data_slot;
         let curr_batch_start =
-            self.data_reader.sub_batch_i * self.data_reader.n_batches * data_slot;
+            self.data_reader.get_sub_batch_i() * self.data_reader.n_batches * data_slot;
 
         let conv_info = &conv_dispatch.conv_info;
 

@@ -92,7 +92,7 @@ impl ErrorPC {
         let slot_size = dr.data_value_size + 1;
 
         return ErrorPC {
-            layer_idx: (dr.n_batches * slot_size * dr.sub_batch_i) as u32,
+            layer_idx: (dr.n_batches * slot_size * dr.get_sub_batch_i()) as u32,
             n_batches: dr.n_batches as u32,
             _pad2: 0,
             _pad3: 0,

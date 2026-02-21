@@ -1,5 +1,6 @@
 use crate::constants::*;
 use crate::data_reader::DataConstructor;
+use crate::data_reader::DataReaderType;
 use crate::datatypes::conv_datatypes::*;
 use crate::datatypes::nn_datatypes::*;
 use crate::dispatch::data_dispatch;
@@ -28,6 +29,7 @@ pub struct ModelConstructor {
     pub data_path: String,
     pub dataset_length: usize,
     pub data_value_size: usize,
+    pub train_test_split: f32,
 
     pub lr: f32,
     pub mr: f32,
@@ -53,6 +55,7 @@ impl ModelConstructor {
             data_path: String::from(""),
             dataset_length: 0,
             data_value_size: 0,
+            train_test_split: 0.8,
 
             lr: 0.1,
             mr: 0.9,
@@ -119,6 +122,7 @@ impl ModelConstructor {
             data_path: String::from(""),
             dataset_length: 0,
             data_value_size: 0,
+            train_test_split: 0.0,
             lr: 0.1,
             mr: 0.9,
             vr: 0.999,
@@ -166,6 +170,10 @@ impl ModelConstructor {
 
     pub fn set_epochs(&mut self, epochs: usize) {
         self.n_epochs = epochs;
+    }
+
+    pub fn set_train_test_splits(&mut self, splits: f32) {
+        self.train_test_split = splits;
     }
 
     pub fn set_split_k(&mut self, split_k: usize) {
@@ -237,7 +245,7 @@ impl ModelConstructor {
     }
 
     pub fn load_all_data(&mut self) {
-        self.data_batches_per_load = self.dataset_length / self.n_batches;
+        self.data_batches_per_load = (self.dataset_length / self.n_batches) as usize;
     }
 }
 //./datasets/testing.csv
@@ -286,7 +294,7 @@ impl NNModel {
     pub fn debug(&mut self) {
         // self.data_dispatch.data_reader.load_batch_testing();
         // self.data_dispatch.data_reader.load_batch_mnist();
-        self.data_dispatch.data_reader.load_batch_debug();
+        // self.data_dispatch.data_reader.load_batch_debug();
 
         self.data_dispatch
             .set_data_nn(&self.gpu_instance, &self.nn_dispatch);
@@ -309,11 +317,11 @@ impl NNModel {
         let (_forward_nn_flop, training_nn_flop) = self.nn_info.get_n_flops();
 
         let total_flops = (get_gflops(training_nn_flop))
-            * (self.data_dispatch.data_reader.n_sub_batches
-                * self.data_dispatch.data_reader.n_load_batches) as f32;
+            * (self.data_dispatch.data_reader.get_n_sub_batches()
+                * self.data_dispatch.data_reader.get_n_load_batches()) as f32;
 
-        let training_size = self.data_dispatch.data_reader.n_load_batches
-            * self.data_dispatch.data_reader.n_sub_batches
+        let training_size = self.data_dispatch.data_reader.get_n_load_batches()
+            * self.data_dispatch.data_reader.get_n_sub_batches()
             * self.data_dispatch.data_reader.n_batches;
 
         let time_taken_seconds = time_taken.as_secs_f64();
@@ -330,17 +338,20 @@ impl NNModel {
         let mut sub_batch_i = 0;
 
         let mut t_i = 1;
+        self.data_dispatch
+            .data_reader
+            .set_current_type(DataReaderType::Train);
 
         for epoch_i in 0..self.model_info.n_epochs {
             self.data_dispatch.data_reader.reset_counters();
             println!("Epoch {}:", epoch_i + 1);
             let t0 = Instant::now();
 
-            for load_batch_i in 0..self.data_dispatch.data_reader.n_load_batches {
+            for load_batch_i in 0..self.data_dispatch.data_reader.get_n_load_batches() {
                 // need to load new batch
                 self.data_dispatch.load_data(&self.gpu_instance);
 
-                for sub_batch_i in 0..self.data_dispatch.data_reader.n_sub_batches {
+                for sub_batch_i in 0..self.data_dispatch.data_reader.get_n_sub_batches() {
                     self.data_dispatch
                         .set_data_nn(&self.gpu_instance, &self.nn_dispatch);
 
@@ -355,13 +366,13 @@ impl NNModel {
                     self.data_dispatch.data_reader.increment_sub_batch();
                     t_i += 1;
                     show_progress(
-                        self.data_dispatch.data_reader.n_sub_batches
+                        self.data_dispatch.data_reader.get_n_sub_batches()
                             * load_batch_i
                             * self.model_info.n_batches
                             + sub_batch_i * self.model_info.n_batches,
                         load_batch_i,
-                        self.data_dispatch.data_reader.n_load_batches
-                            * self.data_dispatch.data_reader.n_sub_batches
+                        self.data_dispatch.data_reader.get_n_load_batches()
+                            * self.data_dispatch.data_reader.get_n_sub_batches()
                             * self.data_dispatch.data_reader.n_batches,
                     );
                 }
@@ -379,14 +390,17 @@ impl NNModel {
         println!("Testing");
         self.data_dispatch.data_reader.reset_counters();
         self.data_dispatch.clear_metrics(&self.gpu_instance);
+        self.data_dispatch
+            .data_reader
+            .set_current_type(DataReaderType::Test);
         let t0 = Instant::now();
 
-        for load_batch_i in 0..self.data_dispatch.data_reader.n_load_batches {
+        for load_batch_i in 0..self.data_dispatch.data_reader.get_n_load_batches() {
             // need to load new batch
             // self.dispatch.data_reader.load_batch_testing();
             self.data_dispatch.load_data(&self.gpu_instance);
 
-            for sub_batch_i in 0..self.data_dispatch.data_reader.n_sub_batches {
+            for sub_batch_i in 0..self.data_dispatch.data_reader.get_n_sub_batches() {
                 self.data_dispatch
                     .set_data_nn(&self.gpu_instance, &self.nn_dispatch);
 
@@ -396,13 +410,13 @@ impl NNModel {
 
                 self.data_dispatch.data_reader.increment_sub_batch();
                 show_progress(
-                    self.data_dispatch.data_reader.n_sub_batches
+                    self.data_dispatch.data_reader.get_n_sub_batches()
                         * load_batch_i
                         * self.model_info.n_batches
                         + sub_batch_i * self.model_info.n_batches,
                     load_batch_i,
-                    self.data_dispatch.data_reader.n_load_batches
-                        * self.data_dispatch.data_reader.n_sub_batches
+                    self.data_dispatch.data_reader.get_n_load_batches()
+                        * self.data_dispatch.data_reader.get_n_sub_batches()
                         * self.data_dispatch.data_reader.n_batches,
                 );
             }
@@ -475,11 +489,11 @@ impl ConvNNModel {
         let (_forward_conv_flop, training_conv_flop) = self.conv_info.get_n_flops();
 
         let total_flops = (get_gflops(training_nn_flop) + get_gflops(training_conv_flop))
-            * (self.data_dispatch.data_reader.n_sub_batches
-                * self.data_dispatch.data_reader.n_load_batches) as f32;
+            * (self.data_dispatch.data_reader.get_n_sub_batches()
+                * self.data_dispatch.data_reader.get_n_load_batches()) as f32;
 
-        let training_size = self.data_dispatch.data_reader.n_load_batches
-            * self.data_dispatch.data_reader.n_sub_batches
+        let training_size = self.data_dispatch.data_reader.get_n_load_batches()
+            * self.data_dispatch.data_reader.get_n_sub_batches()
             * self.data_dispatch.data_reader.n_batches;
 
         let time_taken_seconds = time_taken.as_secs_f64();
@@ -532,16 +546,20 @@ impl ConvNNModel {
     pub fn train(&mut self) {
         let mut t_i = 1;
 
+        self.data_dispatch
+            .data_reader
+            .set_current_type(DataReaderType::Train);
+
         for epoch_i in 0..self.model_info.n_epochs {
             self.data_dispatch.data_reader.reset_counters();
             println!("Epoch {}:", epoch_i + 1);
             let t0 = Instant::now();
 
-            for load_batch_i in 0..self.data_dispatch.data_reader.n_load_batches {
+            for load_batch_i in 0..self.data_dispatch.data_reader.get_n_load_batches() {
                 // need to load new batch
                 self.data_dispatch.load_data(&self.gpu_instance);
 
-                for sub_batch_i in 0..self.data_dispatch.data_reader.n_sub_batches {
+                for sub_batch_i in 0..self.data_dispatch.data_reader.get_n_sub_batches() {
                     self.data_dispatch
                         .set_data_convnn(&self.gpu_instance, &self.conv_dispatch);
 
@@ -567,13 +585,13 @@ impl ConvNNModel {
                     self.data_dispatch.data_reader.increment_sub_batch();
 
                     show_progress(
-                        self.data_dispatch.data_reader.n_sub_batches
+                        self.data_dispatch.data_reader.get_n_sub_batches()
                             * load_batch_i
                             * self.model_info.n_batches
                             + sub_batch_i * self.model_info.n_batches,
                         load_batch_i,
-                        self.data_dispatch.data_reader.n_load_batches
-                            * self.data_dispatch.data_reader.n_sub_batches
+                        self.data_dispatch.data_reader.get_n_load_batches()
+                            * self.data_dispatch.data_reader.get_n_sub_batches()
                             * self.data_dispatch.data_reader.n_batches,
                     );
 
@@ -594,13 +612,17 @@ impl ConvNNModel {
         println!("Testing");
         self.data_dispatch.data_reader.reset_counters();
         self.data_dispatch.clear_metrics(&self.gpu_instance);
+        self.data_dispatch
+            .data_reader
+            .set_current_type(DataReaderType::Test);
+
         let t0 = Instant::now();
 
-        for load_batch_i in 0..self.data_dispatch.data_reader.n_load_batches {
+        for load_batch_i in 0..self.data_dispatch.data_reader.get_n_load_batches() {
             // need to load new batch
             self.data_dispatch.load_data(&self.gpu_instance);
 
-            for sub_batch_i in 0..self.data_dispatch.data_reader.n_sub_batches {
+            for sub_batch_i in 0..self.data_dispatch.data_reader.get_n_sub_batches() {
                 self.data_dispatch
                     .set_data_convnn(&self.gpu_instance, &self.conv_dispatch);
 
@@ -616,13 +638,13 @@ impl ConvNNModel {
                 self.data_dispatch.data_reader.increment_sub_batch();
 
                 show_progress(
-                    self.data_dispatch.data_reader.n_sub_batches
+                    self.data_dispatch.data_reader.get_n_sub_batches()
                         * load_batch_i
                         * self.model_info.n_batches
                         + sub_batch_i * self.model_info.n_batches,
                     load_batch_i,
-                    self.data_dispatch.data_reader.n_load_batches
-                        * self.data_dispatch.data_reader.n_sub_batches
+                    self.data_dispatch.data_reader.get_n_load_batches()
+                        * self.data_dispatch.data_reader.get_n_sub_batches()
                         * self.data_dispatch.data_reader.n_batches,
                 );
             }
