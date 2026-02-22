@@ -1,9 +1,7 @@
 use crate::constants::*;
-use crate::data_reader::DataConstructor;
-use crate::data_reader::DataReaderType;
+use crate::data_reader::*;
 use crate::datatypes::conv_datatypes::*;
 use crate::datatypes::nn_datatypes::*;
-use crate::dispatch::data_dispatch;
 use crate::dispatch::data_dispatch::DataDispatch;
 use crate::dispatch::{conv_dispatch::*, gpu_instance::*, nn_dispatch::*};
 use crate::functions::*;
@@ -24,11 +22,9 @@ pub struct ModelConstructor {
 
     pub n_batches: usize,
 
+    pub dataset: Dataset,
     pub data_batches_per_load: usize,
     pub n_epochs: usize,
-    pub data_path: String,
-    pub dataset_length: usize,
-    pub data_value_size: usize,
     pub train_test_split: f32,
 
     pub lr: f32,
@@ -49,12 +45,10 @@ impl ModelConstructor {
             conv_layer_output: Vec::new(),
             split_k: 256,
 
+            dataset: Dataset::Empty,
             n_batches: 16,
             data_batches_per_load: 100,
             n_epochs: 1,
-            data_path: String::from(""),
-            dataset_length: 0,
-            data_value_size: 0,
             train_test_split: 0.8,
 
             lr: 0.1,
@@ -116,12 +110,10 @@ impl ModelConstructor {
             conv_kernal_dim: conv_kernal_dim,
             conv_layer_output: conv_layer_output,
             split_k: 256,
+            dataset: Dataset::Empty,
             n_batches: 16,
             data_batches_per_load: 100,
             n_epochs: 1,
-            data_path: String::from(""),
-            dataset_length: 0,
-            data_value_size: 0,
             train_test_split: 0.0,
             lr: 0.1,
             mr: 0.9,
@@ -205,47 +197,38 @@ impl ModelConstructor {
         );
     }
 
-    pub fn set_data_mnist_downsampled(&mut self) {
-        self.set_data_info(
-            String::from("datasets/mnist_numbers_downsampled.csv"),
-            42001,
-            1,
-            196,
-        );
-        self.load_all_data();
-    }
+    // pub fn set_data_mnist_downsampled(&mut self) {
+    //     self.set_data_info(
+    //         String::from("datasets/mnist_numbers_downsampled.csv"),
+    //         42001,
+    //         1,
+    //         196,
+    //     );
+    //     self.load_all_data();
+    // }
 
-    pub fn set_data_mnist(&mut self) {
-        self.set_data_info(String::from("datasets/mnist_numbers.csv"), 42001, 1, 784);
-        self.load_all_data();
-    }
+    // pub fn set_data_mnist(&mut self) {
+    //     self.set_data_info(String::from("datasets/mnist_numbers.csv"), 42001, 1, 784);
+    //     self.load_all_data();
+    // }
 
-    pub fn set_data_mnist_letters(&mut self) {
-        self.set_data_info(
-            String::from("datasets/mnist_letters.csv"),
-            124801,
-            1500,
-            784,
-        );
-        // self.set_data_info(String::from("datasets/mnist_letters.csv"), 256, 1, 784);
-        // self.load_all_data();
-    }
+    // pub fn set_data_mnist_letters(&mut self) {
+    //     self.set_data_info(
+    //         String::from("datasets/mnist_letters.csv"),
+    //         124801,
+    //         1500,
+    //         784,
+    //     );
+    //     // self.set_data_info(String::from("datasets/mnist_letters.csv"), 256, 1, 784);
+    //     // self.load_all_data();
+    // }
 
-    pub fn set_data_info(
-        &mut self,
-        path: String,
-        dataset_length: usize,
-        data_batches_per_load: usize,
-        data_value_size: usize,
-    ) {
-        self.data_path = path;
-        self.dataset_length = dataset_length;
+    pub fn set_data_batches_per_load(&mut self, data_batches_per_load: usize) {
         self.data_batches_per_load = data_batches_per_load;
-        self.data_value_size = data_value_size;
     }
 
-    pub fn load_all_data(&mut self) {
-        self.data_batches_per_load = (self.dataset_length / self.n_batches) as usize;
+    pub fn set_dataset(&mut self, dataset: Dataset) {
+        self.dataset = dataset;
     }
 }
 //./datasets/testing.csv
@@ -340,7 +323,7 @@ impl NNModel {
         let mut t_i = 1;
         self.data_dispatch
             .data_reader
-            .set_current_type(DataReaderType::Train);
+            .set_set_type(DataReaderType::Train);
 
         for epoch_i in 0..self.model_info.n_epochs {
             self.data_dispatch.data_reader.reset_counters();
@@ -392,7 +375,7 @@ impl NNModel {
         self.data_dispatch.clear_metrics(&self.gpu_instance);
         self.data_dispatch
             .data_reader
-            .set_current_type(DataReaderType::Test);
+            .set_set_type(DataReaderType::Test);
         let t0 = Instant::now();
 
         for load_batch_i in 0..self.data_dispatch.data_reader.get_n_load_batches() {
@@ -548,7 +531,7 @@ impl ConvNNModel {
 
         self.data_dispatch
             .data_reader
-            .set_current_type(DataReaderType::Train);
+            .set_set_type(DataReaderType::Train);
 
         for epoch_i in 0..self.model_info.n_epochs {
             self.data_dispatch.data_reader.reset_counters();
@@ -614,7 +597,7 @@ impl ConvNNModel {
         self.data_dispatch.clear_metrics(&self.gpu_instance);
         self.data_dispatch
             .data_reader
-            .set_current_type(DataReaderType::Test);
+            .set_set_type(DataReaderType::Test);
 
         let t0 = Instant::now();
 

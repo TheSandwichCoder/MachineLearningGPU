@@ -7,10 +7,8 @@ use csv::StringRecord;
 
 // data_batches_per_load - n sub batches
 pub struct DataConstructor {
-    pub data_path: String,
-    pub dataset_length: usize,
+    pub dataset_info: DatasetInfo,
     pub data_batches_per_load: usize,
-    pub data_value_size: usize,
     pub train_split: f32,
     pub test_split: f32,
 
@@ -19,33 +17,27 @@ pub struct DataConstructor {
 
 impl DataConstructor {
     pub fn new(
-        data_path: String,
-        dataset_length: usize,
+        dataset_info: DatasetInfo,
         train_split: f32,
         test_split: f32,
         data_batches_per_load: usize,
-        data_value_size: usize,
         n_batches: usize,
     ) -> Self {
         return DataConstructor {
-            data_path: data_path,
-            dataset_length: dataset_length,
+            dataset_info: dataset_info,
             train_split: train_split,
             test_split: test_split,
             data_batches_per_load: data_batches_per_load,
-            data_value_size: data_value_size,
             n_batches: n_batches,
         };
     }
 
     pub fn from_model_constructor(model_constructor: &ModelConstructor) -> Self {
         return DataConstructor {
-            data_path: model_constructor.data_path.clone(),
-            dataset_length: model_constructor.dataset_length,
+            dataset_info: get_dataset_info(model_constructor.dataset.clone()),
             train_split: model_constructor.train_test_split,
             test_split: 1.0 - model_constructor.train_test_split,
             data_batches_per_load: model_constructor.data_batches_per_load,
-            data_value_size: model_constructor.data_value_size,
             n_batches: model_constructor.n_batches,
         };
     }
@@ -58,6 +50,14 @@ pub struct DataValue {
 }
 
 impl DataValue {
+    pub fn null() -> DataValue {
+        return DataValue {
+            label: -1.0,
+            info: Vec::new(),
+            data_size: 0,
+        };
+    }
+
     pub fn from_mnist(srecord: &csv::StringRecord) -> DataValue {
         let label = srecord[0].parse::<f32>().unwrap();
 
@@ -152,93 +152,158 @@ pub enum DataReaderType {
     Test,
 }
 
+#[derive(Clone)]
+pub struct DatasetInfo {
+    pub dataset_type: Dataset,
+    pub length: usize,
+    pub data_value_size: usize,
+    pub path: String,
+}
+
+#[derive(Clone)]
+pub enum Dataset {
+    Empty,
+    MNIST,
+    EMNIST,
+    CIFAR,
+}
+
+pub fn get_dataset_info(dataset: Dataset) -> DatasetInfo {
+    match dataset {
+        Dataset::Empty => {
+            return DatasetInfo {
+                dataset_type: dataset,
+                length: 0,
+                data_value_size: 0,
+                path: String::new(),
+            };
+        }
+        Dataset::MNIST => {
+            return DatasetInfo {
+                dataset_type: dataset,
+                length: 42000,
+                data_value_size: 784,
+                path: String::from("datasets/mnist_numbers.csv"),
+            };
+        }
+        Dataset::EMNIST => {
+            return DatasetInfo {
+                dataset_type: dataset,
+                length: 124801,
+                data_value_size: 784,
+                path: String::from("datasets/mnist_letters.csv"),
+            };
+        }
+        Dataset::CIFAR => {
+            return DatasetInfo {
+                dataset_type: dataset,
+                length: 60000,
+                data_value_size: 3072,
+                path: String::from("datasets/cifar"),
+            };
+        }
+    }
+}
+
 pub struct DataReader {
-    pub data_path: String,
-    pub dataset_length: usize,
+    pub dataset_info: DatasetInfo,
     pub loaded_data: Vec<DataValue>,
 
-    pub current_type: DataReaderType,
+    pub set_type: DataReaderType,
     pub train_data_reader: SubDataReader,
     pub test_data_reader: SubDataReader,
 
-    pub data_value_size: usize,
     pub n_batches: usize,
 }
 
 impl DataReader {
     pub fn construct(data_constructor: &DataConstructor) -> Self {
         let train_length =
-            (data_constructor.dataset_length as f32 * data_constructor.train_split) as usize;
+            (data_constructor.dataset_info.length as f32 * data_constructor.train_split) as usize;
         let test_length =
-            (data_constructor.dataset_length as f32 * data_constructor.test_split) as usize;
+            (data_constructor.dataset_info.length as f32 * data_constructor.test_split) as usize;
 
         let train_start = 0 as usize;
         let test_start = train_length;
 
         return DataReader::new(
-            data_constructor.data_path.clone(),
-            data_constructor.dataset_length,
+            data_constructor.dataset_info.clone(),
             SubDataReader::construct(data_constructor, train_start, train_length),
             SubDataReader::construct(data_constructor, test_start, test_length),
-            data_constructor.data_value_size,
             data_constructor.n_batches,
         );
     }
 
     pub fn new(
-        data_path: String,
-        dataset_length: usize,
+        dataset_info: DatasetInfo,
         train_data_reader: SubDataReader,
         test_data_reader: SubDataReader,
-        data_value_size: usize,
         n_batches: usize,
     ) -> Self {
         return DataReader {
-            data_path,
-            dataset_length,
+            dataset_info,
 
             loaded_data: Vec::new(),
 
-            current_type: DataReaderType::Train,
+            set_type: DataReaderType::Train,
             train_data_reader: train_data_reader,
             test_data_reader: test_data_reader,
 
             n_batches: n_batches,
-            data_value_size: data_value_size,
         };
     }
 
-    pub fn set_current_type(&mut self, new_type: DataReaderType) {
-        self.current_type = new_type;
+    pub fn set_set_type(&mut self, new_type: DataReaderType) {
+        self.set_type = new_type;
     }
 
     pub fn load_data(&mut self) {
-        let mut rdr = csv::ReaderBuilder::new()
-            .has_headers(true)
-            .from_path(self.data_path.clone())
-            .unwrap();
-
         self.loaded_data.clear();
 
-        let mut counter: usize = 0;
-        for result in rdr.records() {
-            let record = result.unwrap();
+        match self.dataset_info.dataset_type {
+            Dataset::MNIST | Dataset::EMNIST => {
+                let mut rdr = csv::ReaderBuilder::new()
+                    .has_headers(true)
+                    .from_path(self.dataset_info.path.clone())
+                    .unwrap();
+                let mut counter: usize = 0;
+                for result in rdr.records() {
+                    let record = result.unwrap();
 
-            let data_value = self.load_data_single_type(&record);
+                    let data_value = self.load_data_single_type(&record);
 
-            self.loaded_data.push(data_value);
-            counter += 1;
+                    self.loaded_data.push(data_value);
+                    counter += 1;
+                }
+            }
+            Dataset::CIFAR => {
+                // todo
+            }
+
+            _ => {
+                // todo
+            }
         }
     }
 
     pub fn load_data_single_type(&mut self, string_record: &StringRecord) -> DataValue {
         // return DataValue::from_mnist_downsampled(string_record);
         // return DataValue::from_mnist(string_record);
-        return DataValue::from_mnist_letters(string_record);
+        match self.dataset_info.dataset_type {
+            Dataset::EMNIST => {
+                return DataValue::from_mnist_letters(string_record);
+            }
+            Dataset::MNIST => {
+                return DataValue::from_mnist(string_record);
+            }
+            _ => {
+                return DataValue::null();
+            }
+        }
     }
 
     pub fn get_load_batch_buffer(&self) -> Vec<f32> {
-        match self.current_type {
+        match self.set_type {
             DataReaderType::Train => {
                 return self
                     .train_data_reader
@@ -254,7 +319,7 @@ impl DataReader {
     }
 
     pub fn get_sub_batch_i(&self) -> usize {
-        match self.current_type {
+        match self.set_type {
             DataReaderType::Train => {
                 return self.train_data_reader.sub_batch_i;
             }
@@ -266,7 +331,7 @@ impl DataReader {
     }
 
     pub fn increment_sub_batch(&mut self) {
-        match self.current_type {
+        match self.set_type {
             DataReaderType::Train => {
                 self.train_data_reader.increment_sub_batch();
             }
@@ -278,7 +343,7 @@ impl DataReader {
     }
 
     pub fn increment_load_batch(&mut self) {
-        match self.current_type {
+        match self.set_type {
             DataReaderType::Train => {
                 self.train_data_reader.increment_load_batch();
             }
@@ -290,7 +355,7 @@ impl DataReader {
     }
 
     pub fn get_n_sub_batches(&self) -> usize {
-        match self.current_type {
+        match self.set_type {
             DataReaderType::Train => {
                 return self.train_data_reader.n_sub_batches;
             }
@@ -302,7 +367,7 @@ impl DataReader {
     }
 
     pub fn get_n_load_batches(&self) -> usize {
-        match self.current_type {
+        match self.set_type {
             DataReaderType::Train => {
                 return self.train_data_reader.n_load_batches;
             }
@@ -322,9 +387,9 @@ impl DataReader {
         println!("DATA READER INFO");
 
         println!("\nCAPACITY INFO");
-        println!("volume: {}", self.dataset_length);
+        println!("volume: {}", self.dataset_info.length);
 
-        let dataset_mem = self.dataset_length * self.data_value_size * 4;
+        let dataset_mem = self.dataset_info.length * self.dataset_info.data_value_size * 4;
 
         println!("size: {} floats ({}MB)", dataset_mem, get_mb(dataset_mem));
 
@@ -336,8 +401,6 @@ impl DataReader {
 }
 
 pub struct SubDataReader {
-    pub data_path: String,
-
     pub dataset_length: usize,
     pub data_read_start: usize,
 
@@ -358,17 +421,15 @@ impl SubDataReader {
         dataset_length: usize,
     ) -> Self {
         return SubDataReader::new(
-            data_constructor.data_path.clone(),
             dataset_length,
             data_read_start,
             data_constructor.data_batches_per_load,
-            data_constructor.data_value_size,
+            data_constructor.dataset_info.data_value_size,
             data_constructor.n_batches,
         );
     }
 
     pub fn new(
-        data_path: String,
         dataset_length: usize,
         data_read_start: usize,
         n_sub_batches: usize,
@@ -376,8 +437,6 @@ impl SubDataReader {
         n_batches: usize,
     ) -> Self {
         return SubDataReader {
-            data_path,
-
             dataset_length: dataset_length,
             data_read_start: data_read_start,
 

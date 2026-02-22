@@ -1,11 +1,3 @@
 /target
-datasets/mnist_numbers.csv
-datasets/testing.csv
-saves/saved_nn.txt
-saves/saved_nn.txt
-saves/saved_nn.txt
-saves/saved_nn.txt
-*.csv
-*.csv
-*.csv
-datasets/mnist_letters.csv
+datasets/
+saves/

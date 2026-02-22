@@ -71,7 +71,7 @@ impl ErrorDir {
             ping_start: (nn_info.activity_info.d_start
                 + ping_switch * nn_info.activity_info.a_deriv_buffer_size)
                 as u32,
-            data_size: data_reader.data_value_size as u32,
+            data_size: data_reader.dataset_info.data_value_size as u32,
             n_batches: nn_info.n_batches as u32,
         };
     }
@@ -89,7 +89,7 @@ pub struct ErrorPC {
 impl ErrorPC {
     pub fn new(dr: &DataReader) -> Self {
         // let load_length = dr.n_sub_batches * dr.n_batches;
-        let slot_size = dr.data_value_size + 1;
+        let slot_size = dr.dataset_info.data_value_size + 1;
 
         return ErrorPC {
             layer_idx: (dr.n_batches * slot_size * dr.get_sub_batch_i()) as u32,

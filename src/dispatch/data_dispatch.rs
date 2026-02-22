@@ -706,7 +706,7 @@ impl DataDispatch {
                     label: Some("encoder"),
                 });
 
-        let data_slot = (self.data_reader.data_value_size + 1);
+        let data_slot = (self.data_reader.dataset_info.data_value_size + 1);
         // let curr_batch_start = self.data_reader.load_batch_i * self.data_reader.load_batch_length * data_slot  + self.data_reader.sub_batch_i * self.data_reader.sub_batch_length * data_slot;
         let curr_batch_start =
             self.data_reader.get_sub_batch_i() * self.data_reader.n_batches * data_slot;
@@ -718,14 +718,16 @@ impl DataDispatch {
             let write_i_storage =
                 batch_i * nn_info.activity_info.a_length + nn_info.activity_info.s_start;
 
-            let read_i = batch_i * (self.data_reader.data_value_size + 1) + curr_batch_start + 1; // plus one to skip the label
+            let read_i = batch_i * (self.data_reader.dataset_info.data_value_size + 1)
+                + curr_batch_start
+                + 1; // plus one to skip the label
 
             encoder.copy_buffer_to_buffer(
                 &self.data_buffer,
                 (read_i * 4) as u64,
                 &nn_dispatch.get_act_buffer_ref(),
                 (write_i_swap * 4) as u64,
-                (self.data_reader.data_value_size * 4) as u64,
+                (self.data_reader.dataset_info.data_value_size * 4) as u64,
             );
 
             encoder.copy_buffer_to_buffer(
@@ -733,7 +735,7 @@ impl DataDispatch {
                 (read_i * 4) as u64,
                 &nn_dispatch.get_act_buffer_ref(),
                 (write_i_storage * 4) as u64,
-                (self.data_reader.data_value_size * 4) as u64,
+                (self.data_reader.dataset_info.data_value_size * 4) as u64,
             );
         }
 
@@ -748,7 +750,7 @@ impl DataDispatch {
                     label: Some("encoder"),
                 });
 
-        let data_slot = (self.data_reader.data_value_size + 1);
+        let data_slot = (self.data_reader.dataset_info.data_value_size + 1);
         let curr_batch_start =
             self.data_reader.get_sub_batch_i() * self.data_reader.n_batches * data_slot;
 
@@ -758,14 +760,16 @@ impl DataDispatch {
             let write_i_swap = batch_i * conv_info.activity_info.batch_swap_buffer_size;
             let write_i_storage = batch_i * conv_info.activity_info.dim[0].tens_length;
 
-            let read_i = batch_i * (self.data_reader.data_value_size + 1) + curr_batch_start + 1; // plus one to skip the label
+            let read_i = batch_i * (self.data_reader.dataset_info.data_value_size + 1)
+                + curr_batch_start
+                + 1; // plus one to skip the label
 
             encoder.copy_buffer_to_buffer(
                 &self.data_buffer,
                 (read_i * 4) as u64,
                 &conv_dispatch.get_act_buffer_ref(),
                 (write_i_swap * 4) as u64,
-                (self.data_reader.data_value_size * 4) as u64,
+                (self.data_reader.dataset_info.data_value_size * 4) as u64,
             );
 
             encoder.copy_buffer_to_buffer(
@@ -773,7 +777,7 @@ impl DataDispatch {
                 (read_i * 4) as u64,
                 &conv_dispatch.get_storage_buffer_ref(),
                 (write_i_storage * 4) as u64,
-                (self.data_reader.data_value_size * 4) as u64,
+                (self.data_reader.dataset_info.data_value_size * 4) as u64,
             );
         }
 
