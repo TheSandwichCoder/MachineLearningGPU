@@ -1,4 +1,5 @@
 use bytemuck::{Pod, Zeroable};
+use npy;
 use std::num::NonZeroU64;
 use std::time::Instant;
 use wgpu::util::DeviceExt;
@@ -28,9 +29,9 @@ fn main() {
     let mut model_construct = ModelConstructor::default();
 
     model_construct.set_conv_n_layers(3);
-    model_construct.set_conv_input_layer_dim(vec![28, 28, 1]);
+    model_construct.set_conv_input_layer_dim(vec![28, 28, 3]);
 
-    model_construct.add_kernal_layer(2, 2, 32);
+    model_construct.add_kernal_layer(4, 2, 32);
     model_construct.add_kernal_layer(3, 1, 64);
     model_construct.add_kernal_layer(2, 2, 32);
 
@@ -44,14 +45,11 @@ fn main() {
     model_construct.set_epochs(10);
     model_construct.set_train_test_splits(0.90);
 
-    // model_construct.set_data_mnist();
-    model_construct.set_dataset(Dataset::MNIST);
+    model_construct.set_dataset(Dataset::CIFAR);
     model_construct.set_data_batches_per_load(50);
 
-    // CONV STUFF
+    // // CONV STUFF
     let mut convnn_model = ConvNNModel::construct(model_construct);
-
-    // let mut convnn_model = NNModel::construct(model_construct);
 
     convnn_model.show_all_specs();
 

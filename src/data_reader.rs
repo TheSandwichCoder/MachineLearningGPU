@@ -5,6 +5,11 @@ use crate::functions::*;
 use crate::model::ModelConstructor;
 use csv::StringRecord;
 
+use ndarray::*;
+use ndarray_npy::read_npy;
+use npy::NpyData;
+use std::io::Read;
+
 // data_batches_per_load - n sub batches
 pub struct DataConstructor {
     pub dataset_info: DatasetInfo,
@@ -277,9 +282,29 @@ impl DataReader {
                 }
             }
             Dataset::CIFAR => {
-                // todo
-            }
+                let image_data: Array1<u8> =
+                    read_npy(self.dataset_info.path.clone() + "/images.npy").unwrap();
+                let label_data: Array1<u8> =
+                    read_npy(self.dataset_info.path.clone() + "/labels.npy").unwrap();
 
+                for data_i in 0..self.dataset_info.length {
+                    let mut temp_vec = Vec::new();
+
+                    for data_val_i in self.dataset_info.data_value_size * data_i
+                        ..self.dataset_info.data_value_size * (data_i + 1)
+                    {
+                        temp_vec.push(image_data[data_val_i] as f32 / 255.0);
+                    }
+
+                    let mut data_value = DataValue::null();
+
+                    data_value.data_size = self.dataset_info.data_value_size;
+                    data_value.label = label_data[data_i] as f32;
+                    data_value.info = temp_vec;
+
+                    self.loaded_data.push(data_value);
+                }
+            }
             _ => {
                 // todo
             }

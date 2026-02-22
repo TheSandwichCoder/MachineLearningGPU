@@ -482,7 +482,7 @@ impl ParamsDir {
         let mut rng = rand::thread_rng();
 
         let random_floats: Vec<f32> = (0..self.buffer_size)
-            .map(|_| rng.gen_range(-0.1..=0.1))
+            .map(|_| rng.gen_range(-0.05..=0.05))
             .collect();
 
         return random_floats;

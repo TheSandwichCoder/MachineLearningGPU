@@ -197,32 +197,6 @@ impl ModelConstructor {
         );
     }
 
-    // pub fn set_data_mnist_downsampled(&mut self) {
-    //     self.set_data_info(
-    //         String::from("datasets/mnist_numbers_downsampled.csv"),
-    //         42001,
-    //         1,
-    //         196,
-    //     );
-    //     self.load_all_data();
-    // }
-
-    // pub fn set_data_mnist(&mut self) {
-    //     self.set_data_info(String::from("datasets/mnist_numbers.csv"), 42001, 1, 784);
-    //     self.load_all_data();
-    // }
-
-    // pub fn set_data_mnist_letters(&mut self) {
-    //     self.set_data_info(
-    //         String::from("datasets/mnist_letters.csv"),
-    //         124801,
-    //         1500,
-    //         784,
-    //     );
-    //     // self.set_data_info(String::from("datasets/mnist_letters.csv"), 256, 1, 784);
-    //     // self.load_all_data();
-    // }
-
     pub fn set_data_batches_per_load(&mut self, data_batches_per_load: usize) {
         self.data_batches_per_load = data_batches_per_load;
     }
